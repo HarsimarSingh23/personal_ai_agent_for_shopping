@@ -1,24 +1,45 @@
-# Amazon AI Shopping Agent - Dependencies
-# Core browser automation
+# AI Shopping Agent - Dependencies
+
+# ──────────────────────────────────────────────
+# Browser automation (Amazon scraper)
+# ──────────────────────────────────────────────
+setuptools>=70.0.0          # provides distutils for Python 3.12 (needed by undetected-chromedriver)
 selenium>=4.15.0
-# webdriver-manager removed — undetected_chromedriver manages its own driver
-
-# Undetected ChromeDriver - bypasses most Amazon bot-detection
 undetected-chromedriver>=3.5.5
-
-# Fake User-Agent for spoofing browser fingerprints
 fake-useragent>=1.4.0
 
-# Flipkart scraper (lightweight - no browser needed)
+# ──────────────────────────────────────────────
+# HTTP scraping (Flipkart scraper)
+# ──────────────────────────────────────────────
 requests>=2.28.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 
-# LLM - Google Gemini (free tier) — new SDK
+# ──────────────────────────────────────────────
+# LLM — Google Gemini (free tier)
+# ──────────────────────────────────────────────
 google-genai>=2.7.0
 
-# Env file loading
+# ──────────────────────────────────────────────
+# Environment & config
+# ──────────────────────────────────────────────
 python-dotenv>=1.0.0
+pydantic-settings>=2.0.0
 
-# DuckDuckGo search — no API key required
+# ──────────────────────────────────────────────
+# DuckDuckGo search (no API key required)
+# ──────────────────────────────────────────────
 duckduckgo-search>=6.0.0
+
+# ──────────────────────────────────────────────
+# API backend
+# ──────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+
+# ──────────────────────────────────────────────
+# Database
+# ──────────────────────────────────────────────
+sqlalchemy>=2.0.30
+psycopg2-binary>=2.9.9   # PostgreSQL driver (production)
+# aiosqlite>=0.20.0       # uncomment if you want async SQLite in dev
