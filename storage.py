@@ -66,7 +66,9 @@ class SessionRecord(Base):
     recommendation = Column(JSON, nullable=True)
 
 
-Base.metadata.create_all(bind=engine)
+def init_db():
+    log.info("Storage: initializing database tables")
+    Base.metadata.create_all(bind=engine)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

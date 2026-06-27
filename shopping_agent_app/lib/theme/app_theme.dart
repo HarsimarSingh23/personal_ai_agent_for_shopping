@@ -5,25 +5,25 @@ class AppTheme {
   AppTheme._();
 
   // ── Palette ──────────────────────────────────────────────────────────────
-  static const Color background    = Color(0xFF080B14);
-  static const Color surface       = Color(0xFF0F1523);
-  static const Color surfaceCard   = Color(0xFF141927);
-  static const Color surfaceElevated = Color(0xFF1A2035);
-  static const Color border        = Color(0xFF1E2940);
-  static const Color borderBright  = Color(0xFF2A3A5C);
+  static const Color background    = Color(0xFFF8FAFC);
+  static const Color surface       = Color(0xFFFFFFFF);
+  static const Color surfaceCard   = Color(0xFFFFFFFF);
+  static const Color surfaceElevated = Color(0xFFF1F5F9);
+  static const Color border        = Color(0xFFE2E8F0);
+  static const Color borderBright  = Color(0xFFCBD5E1);
 
-  static const Color primary       = Color(0xFF4F8EF7);
-  static const Color primaryDark   = Color(0xFF2D6FE8);
-  static const Color accent        = Color(0xFF7C3AED);
-  static const Color accentLight   = Color(0xFF9F67FF);
+  static const Color primary       = Color(0xFF2563EB); // Blue 600
+  static const Color primaryDark   = Color(0xFF1D4ED8); // Blue 700
+  static const Color accent        = Color(0xFF7C3AED); // Violet 600
+  static const Color accentLight   = Color(0xFF8B5CF6); // Violet 500
 
-  static const Color gold          = Color(0xFFFBBF24);
+  static const Color gold          = Color(0xFFF59E0B);
   static const Color success       = Color(0xFF10B981);
   static const Color error         = Color(0xFFEF4444);
 
-  static const Color textPrimary   = Color(0xFFF1F5F9);
-  static const Color textSecondary = Color(0xFF94A3B8);
-  static const Color textMuted     = Color(0xFF475569);
+  static const Color textPrimary   = Color(0xFF0F172A); // Slate 900
+  static const Color textSecondary = Color(0xFF475569); // Slate 600
+  static const Color textMuted     = Color(0xFF94A3B8); // Slate 400
 
   // ── Source badge colors ───────────────────────────────────────────────────
   static const Color amazonColor   = Color(0xFFFF9900);
@@ -38,13 +38,13 @@ class AppTheme {
   );
 
   static const LinearGradient recommendGradient = LinearGradient(
-    colors: [Color(0xFF1E3A5F), Color(0xFF2D1B69)],
+    colors: [Color(0xFFEFF6FF), Color(0xFFF5F3FF)], // Blue 50 to Violet 50
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient backgroundGradient = LinearGradient(
-    colors: [Color(0xFF080B14), Color(0xFF0D1220), Color(0xFF080B14)],
+    colors: [Color(0xFFF8FAFC), Color(0xFFFFFFFF), Color(0xFFF8FAFC)],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
@@ -67,11 +67,11 @@ class AppTheme {
   }
 
   // ── ThemeData ─────────────────────────────────────────────────────────────
-  static ThemeData get dark {
-    final base = ThemeData.dark(useMaterial3: true);
+  static ThemeData get light {
+    final base = ThemeData.light(useMaterial3: true);
     return base.copyWith(
       scaffoldBackgroundColor: background,
-      colorScheme: const ColorScheme.dark(
+      colorScheme: const ColorScheme.light(
         primary: primary,
         secondary: accent,
         surface: surface,
@@ -114,8 +114,8 @@ class AppTheme {
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: surfaceElevated,
-        contentTextStyle: GoogleFonts.inter(color: textPrimary),
+        backgroundColor: textPrimary,
+        contentTextStyle: GoogleFonts.inter(color: Colors.white),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         behavior: SnackBarBehavior.floating,
       ),

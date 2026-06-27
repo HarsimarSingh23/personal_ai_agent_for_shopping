@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
 
@@ -41,7 +41,7 @@ class _AnimatedSearchBarState extends State<AnimatedSearchBar> {
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         color: AppTheme.surfaceElevated,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: _focused ? AppTheme.primary : AppTheme.border,
           width: _focused ? 1.5 : 1.0,
@@ -49,16 +49,16 @@ class _AnimatedSearchBarState extends State<AnimatedSearchBar> {
         boxShadow: _focused
             ? [
                 BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.15),
-                  blurRadius: 24,
+                  color: AppTheme.primary.withValues(alpha: 0.08),
+                  blurRadius: 16,
                   spreadRadius: 2,
                 ),
               ]
             : [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
               ],
       ),
@@ -112,8 +112,8 @@ class _AnimatedSearchBarState extends State<AnimatedSearchBar> {
         height: 42,
         margin: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          gradient: AppTheme.primaryGradient,
-          borderRadius: BorderRadius.circular(12),
+          color: AppTheme.primary,
+          borderRadius: BorderRadius.circular(10),
         ),
         child: const Center(
           child: SizedBox(
@@ -135,20 +135,11 @@ class _AnimatedSearchBarState extends State<AnimatedSearchBar> {
         height: 42,
         margin: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          gradient: AppTheme.primaryGradient,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primary.withValues(alpha: 0.4),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          color: AppTheme.primary,
+          borderRadius: BorderRadius.circular(10),
         ),
         child: const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 20),
-      )
-          .animate(onPlay: (c) => c.repeat(reverse: true))
-          .shimmer(delay: 2.seconds, duration: 1.5.seconds, color: Colors.white24),
+      ),
     );
   }
 }

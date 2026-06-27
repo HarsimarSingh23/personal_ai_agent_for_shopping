@@ -14,12 +14,12 @@ import logging
 import os
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -40,7 +40,7 @@ from scraper import scrape as scrape_amazon
 from flipkart_scraper import scrape_flipkart
 from ddg_scraper import scrape_ddg
 from llm import translate_query, recommend
-from storage import save_session, load_sessions, load_last_session, load_session_by_id, check_db_connection
+from storage import save_session, load_sessions, load_last_session, load_session_by_id, check_db_connection, init_db
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Config
@@ -91,12 +91,17 @@ async def add_request_id(request: Request, call_next):
 # Schemas
 # ──────────────────────────────────────────────────────────────────────────────
 class SearchRequest(BaseModel):
-    query: str
+    query: str = Field(..., min_length=2, max_length=200)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Endpoints
 # ──────────────────────────────────────────────────────────────────────────────
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+
 @app.get("/health", tags=["ops"])
 def health():
     """Docker/k8s health probe — verifies API and DB are alive."""
@@ -133,15 +138,18 @@ def search(request: SearchRequest):
     ddg_results:      list[dict] = []
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {
+        futures_map = {
             pool.submit(scrape_amazon,   english_query): "amazon",
             pool.submit(scrape_flipkart, english_query): "flipkart",
             pool.submit(scrape_ddg,      english_query): "web",
         }
-        for future in as_completed(futures, timeout=_SCRAPE_TIMEOUT):
-            site = futures[future]
+        
+        done, not_done = wait(futures_map.keys(), timeout=_SCRAPE_TIMEOUT, return_when=ALL_COMPLETED)
+        
+        for future in done:
+            site = futures_map[future]
             try:
-                data = future.result(timeout=5)   # individual result timeout
+                data = future.result()
                 if site == "amazon":
                     amazon_results   = [dict(p, source="amazon")             for p in data]
                 elif site == "flipkart":
@@ -149,10 +157,12 @@ def search(request: SearchRequest):
                 else:
                     ddg_results      = [dict(p, source=p.get("source", "web")) for p in data]
                 log.info("✓ %s: %d results", site, len(data))
-            except FuturesTimeout:
-                log.warning("⚠ %s scraper timed out after %ds", site, _SCRAPE_TIMEOUT)
             except Exception as e:
                 log.error("✗ %s scrape failed: %s", site, e)
+                
+        for future in not_done:
+            site = futures_map[future]
+            log.warning("⚠ %s scraper timed out after %ds", site, _SCRAPE_TIMEOUT)
 
     combined = amazon_results + flipkart_results + ddg_results
 

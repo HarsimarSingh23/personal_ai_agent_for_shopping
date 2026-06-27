@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../models/search_response.dart';
 import '../services/api_service.dart';
@@ -98,23 +98,15 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
-              ),
-              const SizedBox(width: 10),
+              const Icon(Icons.auto_awesome, color: AppTheme.primary, size: 24),
+              const SizedBox(width: 8),
               const Text(
                 'AI Shopper',
                 style: TextStyle(
                   color: AppTheme.textPrimary,
-                  fontSize: 20,
+                  fontSize: 22,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
+                  letterSpacing: -0.5,
                 ),
               ),
               const Spacer(),
