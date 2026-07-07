@@ -1,10 +1,21 @@
-import asyncio
+"""
+api.py — Production-ready FastAPI backend for the AI Shopping Agent.
+
+Features:
+  - /health endpoint for Docker health checks
+  - Request-ID tracing via X-Request-ID header
+  - Configurable CORS via ALLOWED_ORIGINS env var
+  - 60-second timeout on parallel scraping
+  - Structured JSON logging in production
+  - Full session CRUD endpoints
+"""
+
+import contextvars
 import logging
 import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
-from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -13,7 +24,9 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Logging
+# ──────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  [%(levelname)s]  %(name)s — %(message)s",
@@ -21,48 +34,54 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Imports (after logging is configured)
+# ──────────────────────────────────────────────────────────────────────────────
 from scraper import scrape as scrape_amazon
 from flipkart_scraper import scrape_flipkart
 from ddg_scraper import scrape_ddg
 from llm import translate_query, recommend
 from storage import save_session, load_sessions, load_last_session, load_session_by_id, check_db_connection, init_db
 
+import monitoring
 
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
-if not _raw_origins or _raw_origins == "*":
-    _ALLOWED_ORIGINS = ["*"]
-    _ALLOW_CREDENTIALS = False
-else:
-    _ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
-    _ALLOW_CREDENTIALS = True
+# Wrap agent tools so AgentMonitor records every call — arguments, results,
+# latency, and errors. These are no-ops when monitoring is disabled.
+translate_query = monitoring.tool(translate_query, "translate_query")
+scrape_amazon   = monitoring.tool(scrape_amazon,   "scrape_amazon")
+scrape_flipkart = monitoring.tool(scrape_flipkart, "scrape_flipkart")
+scrape_ddg      = monitoring.tool(scrape_ddg,      "scrape_ddg")
+recommend       = monitoring.tool(recommend,       "recommend")
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Config
+# ──────────────────────────────────────────────────────────────────────────────
+_ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")
+]
 _SCRAPE_TIMEOUT = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "60"))
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-
-
+# ──────────────────────────────────────────────────────────────────────────────
+# FastAPI app
+# ──────────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="AI Shopping Agent API",
     version="1.0.0",
     description="Personal AI Shopping Agent — searches Amazon, Flipkart, and the web.",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
-    allow_credentials=_ALLOW_CREDENTIALS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Request-ID middleware
+# ──────────────────────────────────────────────────────────────────────────────
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
@@ -79,14 +98,25 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Schemas
+# ──────────────────────────────────────────────────────────────────────────────
 class SearchRequest(BaseModel):
-    query: str = Field(..., min_length=2, max_length=256)
+    query: str = Field(..., min_length=2, max_length=200)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Endpoints
+# ──────────────────────────────────────────────────────────────────────────────
+@app.on_event("startup")
+def on_startup():
+    init_db()
+    monitoring.start_dashboard()
 
 
 @app.get("/health", tags=["ops"])
 def health():
+    """Docker/k8s health probe — verifies API and DB are alive."""
     db_ok = check_db_connection()
     status = "ok" if db_ok else "degraded"
     return {
@@ -97,111 +127,157 @@ def health():
 
 
 @app.post("/api/search", tags=["search"])
-async def search(request: SearchRequest):
+def search(request: SearchRequest):
+    """
+    Translate user query → parallel scrape Amazon + Flipkart + DDG
+    → LLM recommendation → save session → return results.
+    """
     user_input = request.query.strip()
-    loop = asyncio.get_running_loop()
+    if not user_input:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    search_start = time.perf_counter()
+    log.info("🔍 Search request: '%s'", user_input)
+
+    # Open a monitored session so AgentMonitor records this whole run.
+    mon_ctx = monitoring.session(query=user_input)
+    mon = mon_ctx.__enter__()
     try:
-        english_query = await loop.run_in_executor(None, translate_query, user_input)
-    except EnvironmentError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        err_str = str(e)
-        log.error(f"Translation failed: {err_str}")
-        if "401 UNAUTHENTICATED" in err_str or "API_KEY_INVALID" in err_str or "invalid authentication" in err_str.lower():
-            safe_msg = "Invalid or expired AI API Key configured."
-        else:
-            safe_msg = "AI processing service is temporarily unavailable."
-        raise HTTPException(status_code=500, detail=safe_msg)
+        mon.log_user_message(user_input)
 
-    amazon_results:   list[dict] = []
-    flipkart_results: list[dict] = []
-    ddg_results:      list[dict] = []
+        # 1. Translate query to English
+        try:
+            t0 = time.perf_counter()
+            english_query = translate_query(user_input)
+            log.info(
+                "🌐 Translated query: '%s' → '%s'  (%.0fms)",
+                user_input, english_query, (time.perf_counter() - t0) * 1000,
+            )
+        except EnvironmentError as e:
+            log.error("✗ Translation failed (config): %s", e)
+            raise HTTPException(status_code=503, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception("✗ Translation failed for '%s': %s", user_input, e)
+            raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
-    def _run_scrapers():
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures_map = {
-                pool.submit(scrape_amazon,   english_query): "amazon",
-                pool.submit(scrape_flipkart, english_query): "flipkart",
-                pool.submit(scrape_ddg,      english_query): "web",
-            }
+        # 2. Parallel scrape with timeout
+        amazon_results:   list[dict] = []
+        flipkart_results: list[dict] = []
+        ddg_results:      list[dict] = []
+
+        log.info("🛒 Scraping Amazon + Flipkart + Web for '%s' …", english_query)
+        scrape_start = time.perf_counter()
+        with mon.turn("scrape"), ThreadPoolExecutor(max_workers=3) as pool:
+            # Copy the current context per thread so scraper tool-calls are
+            # recorded under this session/turn (contextvars don't cross threads).
+            futures_map = {}
+            for _fn, _site in (
+                (scrape_amazon,   "amazon"),
+                (scrape_flipkart, "flipkart"),
+                (scrape_ddg,      "web"),
+            ):
+                _ctx = contextvars.copy_context()
+                futures_map[pool.submit(_ctx.run, _fn, english_query)] = _site
 
             done, not_done = wait(futures_map.keys(), timeout=_SCRAPE_TIMEOUT, return_when=ALL_COMPLETED)
-
-            results_local = {"amazon": [], "flipkart": [], "web": []}
 
             for future in done:
                 site = futures_map[future]
                 try:
                     data = future.result()
                     if site == "amazon":
-                        results_local["amazon"]   = [dict(p, source="amazon")             for p in data]
+                        amazon_results   = [dict(p, source="amazon")             for p in data]
                     elif site == "flipkart":
-                        results_local["flipkart"] = [dict(p, source="flipkart")           for p in data]
+                        flipkart_results = [dict(p, source="flipkart")           for p in data]
                     else:
-                        results_local["web"]      = [dict(p, source=p.get("source", "web")) for p in data]
-                    log.info("✓ %s: %d results", site, len(data))
+                        ddg_results      = [dict(p, source=p.get("source", "web")) for p in data]
+                    log.info("  ✓ %-8s → %d results", site, len(data))
                 except Exception as e:
-                    log.error("✗ %s scrape failed: %s", site, e)
+                    log.exception("  ✗ %-8s scrape failed: %s", site, e)
 
             for future in not_done:
-                future.cancel()
-                log.warning("⚠ %s scraper timed out after %ds — future cancelled", futures_map[future], _SCRAPE_TIMEOUT)
+                site = futures_map[future]
+                log.warning("  ⚠ %-8s scraper timed out after %ds", site, _SCRAPE_TIMEOUT)
 
-            return results_local
+        combined = amazon_results + flipkart_results + ddg_results
+        log.info(
+            "📦 Scrape complete for '%s': amazon=%d flipkart=%d web=%d (total=%d)  (%.0fms)",
+            english_query, len(amazon_results), len(flipkart_results),
+            len(ddg_results), len(combined), (time.perf_counter() - scrape_start) * 1000,
+        )
 
-    scraped = await loop.run_in_executor(None, _run_scrapers)
-    amazon_results   = scraped["amazon"]
-    flipkart_results = scraped["flipkart"]
-    ddg_results      = scraped["web"]
+        if not combined:
+            log.warning("🚫 No products found for '%s' — returning empty result", english_query)
+            mon.log_response("No products found.", query=english_query, products=0)
+            return {
+                "session_id":     None,
+                "query":          english_query,
+                "results":        {"amazon": [], "flipkart": [], "web": []},
+                "recommendation": None,
+                "message":        "No products found. Try a different query.",
+            }
 
-    combined = amazon_results + flipkart_results + ddg_results
+        # 3. LLM recommendation
+        try:
+            t0 = time.perf_counter()
+            rec = recommend(english_query, combined)
+            _rp = (rec or {}).get("product") or {}
+            log.info(
+                "🤖 Recommendation: [%s] %s — %s  (%.0fms)",
+                _rp.get("source", "?"),
+                (_rp.get("title") or "N/A")[:80],
+                (rec or {}).get("reason", "")[:120],
+                (time.perf_counter() - t0) * 1000,
+            )
+        except Exception as e:
+            log.exception("✗ Recommendation failed for '%s': %s", english_query, e)
+            rec = {"product": combined[0], "reason": "AI unavailable — showing first result."}
 
-    if not combined:
-        return {
-            "session_id":     None,
-            "query":          english_query,
-            "results":        {"amazon": [], "flipkart": [], "web": []},
-            "recommendation": None,
-            "message":        "No products found. Try a different query.",
-        }
-
-    try:
-        rec = await loop.run_in_executor(None, recommend, english_query, combined)
-    except Exception as e:
-        log.error("Recommendation failed: %s", e)
-        rec = {"product": combined[0], "reason": "AI unavailable — showing first result."}
-
-    session_id = None
-    try:
-        session_id = await loop.run_in_executor(
-            None,
-            lambda: save_session(
+        # 4. Persist session
+        session_id = None
+        try:
+            session_id = save_session(
                 query_original=user_input,
                 query_english=english_query,
                 amazon_results=amazon_results,
                 flipkart_results=flipkart_results,
                 ddg_results=ddg_results,
                 recommendation=rec,
-            ),
-        )
-    except Exception as e:
-        log.error("Failed to save session: %s", e)
+            )
+            log.info("💾 Saved session %s", session_id)
+        except Exception as e:
+            log.exception("✗ Failed to save session for '%s': %s", english_query, e)
 
-    return {
-        "session_id": session_id,
-        "query":      english_query,
-        "results": {
-            "amazon":   amazon_results,
-            "flipkart": flipkart_results,
-            "web":      ddg_results,
-        },
-        "recommendation": rec,
-    }
+        _rp = (rec or {}).get("product") or {}
+        mon.log_response(
+            f"Recommended [{_rp.get('source', '?')}] "
+            f"{(_rp.get('title') or 'N/A')[:80]} — {(rec or {}).get('reason', '')[:200]}",
+            query=english_query, products=len(combined), session_id=session_id,
+        )
+        log.info(
+            "✅ Search done: '%s' → %d products, session=%s  (total %.0fms)",
+            english_query, len(combined), session_id,
+            (time.perf_counter() - search_start) * 1000,
+        )
+        return {
+            "session_id": session_id,
+            "query":      english_query,
+            "results": {
+                "amazon":   amazon_results,
+                "flipkart": flipkart_results,
+                "web":      ddg_results,
+            },
+            "recommendation": rec,
+        }
+    finally:
+        mon_ctx.__exit__(None, None, None)
 
 
 @app.get("/api/sessions", tags=["sessions"])
 def get_sessions():
+    """Return all saved search sessions, newest first."""
     try:
         return load_sessions()
     except Exception as e:
@@ -211,6 +287,7 @@ def get_sessions():
 
 @app.get("/api/sessions/last", tags=["sessions"])
 def get_last_session():
+    """Return the most recent search session."""
     try:
         session = load_last_session()
         if not session:
@@ -225,6 +302,7 @@ def get_last_session():
 
 @app.get("/api/sessions/{session_id}", tags=["sessions"])
 def get_session(session_id: str):
+    """Return a specific session by ID."""
     try:
         session = load_session_by_id(session_id)
         if not session:
@@ -237,7 +315,9 @@ def get_session(session_id: str):
         raise HTTPException(status_code=500, detail="Could not load session")
 
 
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Dev entry point
+# ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
