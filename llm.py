@@ -1,9 +1,13 @@
 """
-llm.py — Gemini LLM gateway for the AI Shopping Agent.
+llm.py — LLM gateway for the AI Shopping Agent.
 
     from llm import translate_query, recommend
 
-Set GEMINI_API_KEY in .env  (https://aistudio.google.com/app/apikey)
+Supports two providers, selected via the LLM_PROVIDER env var:
+  - "nvidia" (default) — NVIDIA NIM, OpenAI-compatible API.
+        Set NVIDIA_API_KEY in .env  (https://build.nvidia.com/)
+  - "gemini"           — Google Gemini.
+        Set GEMINI_API_KEY in .env  (https://aistudio.google.com/app/apikey)
 """
 
 import os
@@ -17,17 +21,32 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-_MODEL_PRIORITY = [
+# ──────────────────────────────────────────────────────────────────────────────
+# Provider selection
+# ──────────────────────────────────────────────────────────────────────────────
+_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia").strip().lower()
+
+# ── Gemini config ─────────────────────────────────────────────────────────────
+_GEMINI_MODEL_PRIORITY = [
     "gemini-2.5-flash",
     "gemini-2.0-flash-lite",
     "gemini-2.0-flash",
     "gemini-flash-latest",
 ]
+
+# ── NVIDIA config ─────────────────────────────────────────────────────────────
+_NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+_NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+_NVIDIA_MAX_TOKENS = int(os.getenv("NVIDIA_MAX_TOKENS", "16384"))
+
 _client = None
 _client_lock = threading.Lock()
 
 
-def _get_client():
+# ──────────────────────────────────────────────────────────────────────────────
+# Gemini
+# ──────────────────────────────────────────────────────────────────────────────
+def _get_gemini_client():
     global _client
     if _client is not None:         # fast path — no lock needed
         return _client
@@ -55,13 +74,12 @@ def _get_client():
     return _client
 
 
-def _ask(prompt: str) -> str:
+def _ask_gemini(prompt: str) -> str:
     """Send prompt to Gemini, falling back across models on quota exhaustion."""
-    from google import genai
-    client = _get_client()
+    client = _get_gemini_client()
 
     last_error = None
-    for model in _MODEL_PRIORITY:
+    for model in _GEMINI_MODEL_PRIORITY:
         try:
             response = client.models.generate_content(model=model, contents=prompt)
             log.debug("Used model: %s", model)
@@ -83,6 +101,75 @@ def _ask(prompt: str) -> str:
         f"Last error: {last_error}\n"
         f"Free tier resets daily — try again tomorrow, or add billing at "
         f"https://console.cloud.google.com"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# NVIDIA (OpenAI-compatible NIM API)
+# ──────────────────────────────────────────────────────────────────────────────
+def _get_nvidia_client():
+    global _client
+    if _client is not None:         # fast path — no lock needed
+        return _client
+
+    with _client_lock:              # slow path — only one thread initialises
+        if _client is not None:     # double-checked locking
+            return _client
+
+        api_key = os.getenv("NVIDIA_API_KEY")
+        if not api_key or api_key == "your_nvidia_api_key_here":
+            raise EnvironmentError(
+                "NVIDIA_API_KEY is not set.\n"
+                "1. Go to https://build.nvidia.com/  and create an API key\n"
+                "2. Add NVIDIA_API_KEY=... to your .env"
+            )
+
+        try:
+            from openai import OpenAI
+            _client = OpenAI(base_url=_NVIDIA_BASE_URL, api_key=api_key)
+            log.info("NVIDIA client ready (model: %s)", _NVIDIA_MODEL)
+        except ImportError:
+            raise ImportError("'openai' not found. Run: pip install openai")
+
+    return _client
+
+
+def _ask_nvidia(prompt: str) -> str:
+    """Send prompt to the NVIDIA NIM chat-completions endpoint."""
+    client = _get_nvidia_client()
+
+    response = client.chat.completions.create(
+        model=_NVIDIA_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=1,
+        top_p=0.95,
+        max_tokens=_NVIDIA_MAX_TOKENS,
+        extra_body={
+            "chat_template_kwargs": {"enable_thinking": True},
+            "reasoning_budget": _NVIDIA_MAX_TOKENS,
+        },
+    )
+
+    message = response.choices[0].message
+    content = (message.content or "").strip()
+    if not content:
+        # Reasoning-only responses can leave content empty; fall back to the
+        # reasoning trace so callers still receive something to parse.
+        content = (getattr(message, "reasoning_content", None) or "").strip()
+    log.debug("Used model: %s", _NVIDIA_MODEL)
+    return content
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Provider dispatch
+# ──────────────────────────────────────────────────────────────────────────────
+def _ask(prompt: str) -> str:
+    if _PROVIDER == "gemini":
+        return _ask_gemini(prompt)
+    if _PROVIDER == "nvidia":
+        return _ask_nvidia(prompt)
+    raise ValueError(
+        f"Unknown LLM_PROVIDER '{_PROVIDER}'. Use 'nvidia' or 'gemini'."
     )
 
 
