@@ -1,46 +1,28 @@
+
 # AI Shopping Agent - Dependencies
-
-# ──────────────────────────────────────────────
-# Browser automation (Amazon scraper)
-# ──────────────────────────────────────────────
-setuptools>=70.0.0          # provides distutils for Python 3.12 (needed by undetected-chromedriver)
-selenium>=4.15.0
-undetected-chromedriver>=3.5.5
-fake-useragent>=1.4.0
-
-# ──────────────────────────────────────────────
-# HTTP scraping (Flipkart scraper)
-# ──────────────────────────────────────────────
-requests>=2.28.0
-beautifulsoup4>=4.12.0
-lxml>=4.9.0
-
-# ──────────────────────────────────────────────
-# LLM — Google Gemini (free tier)
-# ──────────────────────────────────────────────
-openai>=1.0.0
-
-
-# ──────────────────────────────────────────────
-# Environment & config
-# ──────────────────────────────────────────────
-python-dotenv>=1.0.0
-pydantic-settings>=2.0.0
-
-# ──────────────────────────────────────────────
-# DuckDuckGo search (no API key required)
-# ──────────────────────────────────────────────
-duckduckgo-search>=6.0.0
-
-# ──────────────────────────────────────────────
 # API backend
-# ──────────────────────────────────────────────
-fastapi>=0.111.0
-uvicorn[standard]>=0.30.0
-
-# ──────────────────────────────────────────────
+# Browser automation (Amazon scraper)
 # Database
-# ──────────────────────────────────────────────
-sqlalchemy>=2.0.30
-psycopg2-binary>=2.9.9   # PostgreSQL driver (production)
+# DuckDuckGo search (no API key required)
+# Environment & config
+# HTTP scraping (Flipkart scraper)
+# LLM providers (selected via LLM_PROVIDER env var)
 # aiosqlite>=0.20.0       # uncomment if you want async SQLite in dev
+# ──────────────────────────────────────────────
+beautifulsoup4>=4.12.0
+contextdb[tokens] @ git+https://github.com/HarsimarSingh23/AgentMonitor.git   # observability (AgentMonitor)
+duckduckgo-search>=6.0.0
+fake-useragent>=1.4.0
+fastapi>=0.111.0
+google-genai>=2.7.0          # provider: gemini
+lxml>=4.9.0
+openai>=1.30.0               # provider: nvidia (OpenAI-compatible NIM API)
+psycopg2-binary>=2.9.9   # PostgreSQL driver (production)
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+requests>=2.28.0
+selenium>=4.15.0
+setuptools>=70.0.0          # provides distutils for Python 3.12 (needed by undetected-chromedriver)
+sqlalchemy>=2.0.30
+undetected-chromedriver>=3.5.5
+uvicorn[standard]>=0.30.0
