@@ -13,6 +13,8 @@ import re
 import subprocess
 import time
 import sys
+import os
+import platform
 
 # stdout/stderr encoding is set by the entry-point (agent.py), not here.
 
@@ -44,20 +46,33 @@ PAGE_LOAD_WAIT = 30
 
 
 def _detect_chrome_version() -> int:
-    """Auto-detect installed Chrome major version from the Windows registry."""
+    """Auto-detect installed Chrome major version from OS or env var."""
+    chrome_ver_env = os.environ.get("CHROME_VERSION", "").strip()
+    if chrome_ver_env:
+        return int(chrome_ver_env)
+        
     try:
-        result = subprocess.run(
-            ["reg", "query",
-             r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon",
-             "/v", "version"],
-            capture_output=True, text=True, timeout=5,
-        )
-        match = re.search(r"(\d+)\.\d+", result.stdout)
-        if match:
-            return int(match.group(1))
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["reg", "query",
+                 r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon",
+                 "/v", "version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            match = re.search(r"(\d+)\.\d+", result.stdout)
+            if match:
+                return int(match.group(1))
+        else:
+            result = subprocess.run(
+                ["google-chrome", "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            match = re.search(r"Google Chrome (\d+)\.", result.stdout)
+            if match:
+                return int(match.group(1))
     except Exception:
         pass
-    return 148  # fallback if registry lookup fails
+    return 148  # fallback if lookup fails
 
 
 CHROME_VERSION = _detect_chrome_version()
