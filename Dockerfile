@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxdamage1 \
     libxrandr2 \
     xdg-utils \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 
