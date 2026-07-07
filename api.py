@@ -10,6 +10,7 @@ Features:
   - Full session CRUD endpoints
 """
 
+import contextvars
 import logging
 import os
 import time
@@ -41,6 +42,16 @@ from flipkart_scraper import scrape_flipkart
 from ddg_scraper import scrape_ddg
 from llm import translate_query, recommend
 from storage import save_session, load_sessions, load_last_session, load_session_by_id, check_db_connection, init_db
+
+import monitoring
+
+# Wrap agent tools so AgentMonitor records every call — arguments, results,
+# latency, and errors. These are no-ops when monitoring is disabled.
+translate_query = monitoring.tool(translate_query, "translate_query")
+scrape_amazon   = monitoring.tool(scrape_amazon,   "scrape_amazon")
+scrape_flipkart = monitoring.tool(scrape_flipkart, "scrape_flipkart")
+scrape_ddg      = monitoring.tool(scrape_ddg,      "scrape_ddg")
+recommend       = monitoring.tool(recommend,       "recommend")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Config
@@ -100,6 +111,7 @@ class SearchRequest(BaseModel):
 @app.on_event("startup")
 def on_startup():
     init_db()
+    monitoring.start_dashboard()
 
 
 @app.get("/health", tags=["ops"])
@@ -124,88 +136,143 @@ def search(request: SearchRequest):
     if not user_input:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    # 1. Translate query to English
+    search_start = time.perf_counter()
+    log.info("🔍 Search request: '%s'", user_input)
+
+    # Open a monitored session so AgentMonitor records this whole run.
+    mon_ctx = monitoring.session(query=user_input)
+    mon = mon_ctx.__enter__()
     try:
-        english_query = translate_query(user_input)
-    except EnvironmentError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
+        mon.log_user_message(user_input)
 
-    # 2. Parallel scrape with timeout
-    amazon_results:   list[dict] = []
-    flipkart_results: list[dict] = []
-    ddg_results:      list[dict] = []
+        # 1. Translate query to English
+        try:
+            t0 = time.perf_counter()
+            english_query = translate_query(user_input)
+            log.info(
+                "🌐 Translated query: '%s' → '%s'  (%.0fms)",
+                user_input, english_query, (time.perf_counter() - t0) * 1000,
+            )
+        except EnvironmentError as e:
+            log.error("✗ Translation failed (config): %s", e)
+            raise HTTPException(status_code=503, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception("✗ Translation failed for '%s': %s", user_input, e)
+            raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures_map = {
-            pool.submit(scrape_amazon,   english_query): "amazon",
-            pool.submit(scrape_flipkart, english_query): "flipkart",
-            pool.submit(scrape_ddg,      english_query): "web",
-        }
-        
-        done, not_done = wait(futures_map.keys(), timeout=_SCRAPE_TIMEOUT, return_when=ALL_COMPLETED)
-        
-        for future in done:
-            site = futures_map[future]
-            try:
-                data = future.result()
-                if site == "amazon":
-                    amazon_results   = [dict(p, source="amazon")             for p in data]
-                elif site == "flipkart":
-                    flipkart_results = [dict(p, source="flipkart")           for p in data]
-                else:
-                    ddg_results      = [dict(p, source=p.get("source", "web")) for p in data]
-                log.info("✓ %s: %d results", site, len(data))
-            except Exception as e:
-                log.error("✗ %s scrape failed: %s", site, e)
-                
-        for future in not_done:
-            site = futures_map[future]
-            log.warning("⚠ %s scraper timed out after %ds", site, _SCRAPE_TIMEOUT)
+        # 2. Parallel scrape with timeout
+        amazon_results:   list[dict] = []
+        flipkart_results: list[dict] = []
+        ddg_results:      list[dict] = []
 
-    combined = amazon_results + flipkart_results + ddg_results
+        log.info("🛒 Scraping Amazon + Flipkart + Web for '%s' …", english_query)
+        scrape_start = time.perf_counter()
+        with mon.turn("scrape"), ThreadPoolExecutor(max_workers=3) as pool:
+            # Copy the current context per thread so scraper tool-calls are
+            # recorded under this session/turn (contextvars don't cross threads).
+            futures_map = {}
+            for _fn, _site in (
+                (scrape_amazon,   "amazon"),
+                (scrape_flipkart, "flipkart"),
+                (scrape_ddg,      "web"),
+            ):
+                _ctx = contextvars.copy_context()
+                futures_map[pool.submit(_ctx.run, _fn, english_query)] = _site
 
-    if not combined:
-        return {
-            "session_id":     None,
-            "query":          english_query,
-            "results":        {"amazon": [], "flipkart": [], "web": []},
-            "recommendation": None,
-            "message":        "No products found. Try a different query.",
-        }
+            done, not_done = wait(futures_map.keys(), timeout=_SCRAPE_TIMEOUT, return_when=ALL_COMPLETED)
 
-    # 3. LLM recommendation
-    try:
-        rec = recommend(english_query, combined)
-    except Exception as e:
-        log.error("Recommendation failed: %s", e)
-        rec = {"product": combined[0], "reason": "AI unavailable — showing first result."}
+            for future in done:
+                site = futures_map[future]
+                try:
+                    data = future.result()
+                    if site == "amazon":
+                        amazon_results   = [dict(p, source="amazon")             for p in data]
+                    elif site == "flipkart":
+                        flipkart_results = [dict(p, source="flipkart")           for p in data]
+                    else:
+                        ddg_results      = [dict(p, source=p.get("source", "web")) for p in data]
+                    log.info("  ✓ %-8s → %d results", site, len(data))
+                except Exception as e:
+                    log.exception("  ✗ %-8s scrape failed: %s", site, e)
 
-    # 4. Persist session
-    session_id = None
-    try:
-        session_id = save_session(
-            query_original=user_input,
-            query_english=english_query,
-            amazon_results=amazon_results,
-            flipkart_results=flipkart_results,
-            ddg_results=ddg_results,
-            recommendation=rec,
+            for future in not_done:
+                site = futures_map[future]
+                log.warning("  ⚠ %-8s scraper timed out after %ds", site, _SCRAPE_TIMEOUT)
+
+        combined = amazon_results + flipkart_results + ddg_results
+        log.info(
+            "📦 Scrape complete for '%s': amazon=%d flipkart=%d web=%d (total=%d)  (%.0fms)",
+            english_query, len(amazon_results), len(flipkart_results),
+            len(ddg_results), len(combined), (time.perf_counter() - scrape_start) * 1000,
         )
-    except Exception as e:
-        log.error("Failed to save session: %s", e)
 
-    return {
-        "session_id": session_id,
-        "query":      english_query,
-        "results": {
-            "amazon":   amazon_results,
-            "flipkart": flipkart_results,
-            "web":      ddg_results,
-        },
-        "recommendation": rec,
-    }
+        if not combined:
+            log.warning("🚫 No products found for '%s' — returning empty result", english_query)
+            mon.log_response("No products found.", query=english_query, products=0)
+            return {
+                "session_id":     None,
+                "query":          english_query,
+                "results":        {"amazon": [], "flipkart": [], "web": []},
+                "recommendation": None,
+                "message":        "No products found. Try a different query.",
+            }
+
+        # 3. LLM recommendation
+        try:
+            t0 = time.perf_counter()
+            rec = recommend(english_query, combined)
+            _rp = (rec or {}).get("product") or {}
+            log.info(
+                "🤖 Recommendation: [%s] %s — %s  (%.0fms)",
+                _rp.get("source", "?"),
+                (_rp.get("title") or "N/A")[:80],
+                (rec or {}).get("reason", "")[:120],
+                (time.perf_counter() - t0) * 1000,
+            )
+        except Exception as e:
+            log.exception("✗ Recommendation failed for '%s': %s", english_query, e)
+            rec = {"product": combined[0], "reason": "AI unavailable — showing first result."}
+
+        # 4. Persist session
+        session_id = None
+        try:
+            session_id = save_session(
+                query_original=user_input,
+                query_english=english_query,
+                amazon_results=amazon_results,
+                flipkart_results=flipkart_results,
+                ddg_results=ddg_results,
+                recommendation=rec,
+            )
+            log.info("💾 Saved session %s", session_id)
+        except Exception as e:
+            log.exception("✗ Failed to save session for '%s': %s", english_query, e)
+
+        _rp = (rec or {}).get("product") or {}
+        mon.log_response(
+            f"Recommended [{_rp.get('source', '?')}] "
+            f"{(_rp.get('title') or 'N/A')[:80]} — {(rec or {}).get('reason', '')[:200]}",
+            query=english_query, products=len(combined), session_id=session_id,
+        )
+        log.info(
+            "✅ Search done: '%s' → %d products, session=%s  (total %.0fms)",
+            english_query, len(combined), session_id,
+            (time.perf_counter() - search_start) * 1000,
+        )
+        return {
+            "session_id": session_id,
+            "query":      english_query,
+            "results": {
+                "amazon":   amazon_results,
+                "flipkart": flipkart_results,
+                "web":      ddg_results,
+            },
+            "recommendation": rec,
+        }
+    finally:
+        mon_ctx.__exit__(None, None, None)
 
 
 @app.get("/api/sessions", tags=["sessions"])
