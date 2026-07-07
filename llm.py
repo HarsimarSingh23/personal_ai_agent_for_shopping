@@ -1,11 +1,3 @@
-"""
-llm.py — Gemini LLM gateway for the AI Shopping Agent.
-
-    from llm import translate_query, recommend
-
-Set GEMINI_API_KEY in .env  (https://aistudio.google.com/app/apikey)
-"""
-
 import os
 import re
 import json
@@ -13,15 +5,17 @@ import logging
 import threading
 from dotenv import load_dotenv
 
+from openai import OpenAI
+
 load_dotenv()
 
 log = logging.getLogger(__name__)
 
+# Using NVIDIA NIM API with Gemma or Llama3
 _MODEL_PRIORITY = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-flash-latest",
+    "meta/llama-3.1-70b-instruct",
+    "google/gemma-2-27b-it",
+    "meta/llama-3.1-8b-instruct"
 ]
 _client = None
 _client_lock = threading.Lock()
@@ -29,47 +23,51 @@ _client_lock = threading.Lock()
 
 def _get_client():
     global _client
-    if _client is not None:         # fast path — no lock needed
-        return _client
 
-    with _client_lock:              # slow path — only one thread initialises
-        if _client is not None:     # double-checked locking
+    with _client_lock:
+        if _client is not None:
             return _client
 
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key or api_key == "your_gemini_api_key_here":
+        api_key = os.getenv("NVIDIA_API_KEY")
+        if not api_key or api_key == "your_nvidia_api_key_here":
             raise EnvironmentError(
-                "GEMINI_API_KEY is not set.\n"
-                "1. Go to https://aistudio.google.com/app/apikey  (free)\n"
-                "2. Copy .env.example → .env\n"
-                "3. Paste your key into .env"
+                "NVIDIA_API_KEY is not set.\n"
+                "1. Go to https://build.nvidia.com/\n"
+                "2. Generate an API key\n"
+                "3. Paste your key into .env as NVIDIA_API_KEY=..."
             )
 
         try:
-            from google import genai
-            _client = genai.Client(api_key=api_key)
-            log.info("Gemini client ready")
-        except ImportError:
-            raise ImportError("'google-genai' not found. Run: pip install google-genai")
+            _client = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=api_key,
+                timeout=15.0
+            )
+            log.info("NVIDIA client ready")
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
 
     return _client
 
 
 def _ask(prompt: str) -> str:
-    """Send prompt to Gemini, falling back across models on quota exhaustion."""
-    from google import genai
     client = _get_client()
 
     last_error = None
     for model in _MODEL_PRIORITY:
         try:
-            response = client.models.generate_content(model=model, contents=prompt)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=1024,
+            )
             log.debug("Used model: %s", model)
-            return response.text.strip()
+            return response.choices[0].message.content.strip()
         except Exception as e:
             err_str = str(e)
             if (
-                any(k in err_str for k in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE"))
+                any(k in err_str for k in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "rate_limit"))
                 or "quota" in err_str.lower()
                 or "high demand" in err_str.lower()
             ):
@@ -79,18 +77,18 @@ def _ask(prompt: str) -> str:
             raise
 
     raise RuntimeError(
-        f"All Gemini models exhausted their quota.\n"
+        f"All NVIDIA models exhausted their quota or failed.\n"
         f"Last error: {last_error}\n"
-        f"Free tier resets daily — try again tomorrow, or add billing at "
-        f"https://console.cloud.google.com"
     )
 
 
 def translate_query(raw_input: str) -> str:
-    """
-    Translate a natural-language product request (any language) into a
-    concise English Amazon/Flipkart search query (3–8 words).
-    """
+    if len(raw_input) > 500:
+        log.warning(
+            "translate_query: input truncated from %d to 500 chars — LLM may receive "
+            "an incomplete sentence. Consider increasing the limit or rejecting long inputs.",
+            len(raw_input),
+        )
     safe_input = raw_input[:500].replace('"', "'").replace("\n", " ").strip()
 
     prompt = f"""
@@ -113,17 +111,15 @@ English search query:"""
 
 
 def recommend(original_query: str, products: list[dict]) -> dict:
-    """
-    Pick the best product from a combined list and explain why.
-
-    Returns dict with keys: product (dict), reason (str).
-    Falls back to highest-rated product if LLM JSON parse fails.
-    """
     if not products:
         return {"product": None, "reason": "No products were found to compare."}
 
+    capped_products = products[:20]
+    if len(products) > 20:
+        log.debug("recommend: capping %d products to 20 for LLM prompt", len(products))
+
     product_lines = []
-    for i, p in enumerate(products, 1):
+    for i, p in enumerate(capped_products, 1):
         product_lines.append(
             f"{i}. [{p.get('source', '?').upper()}] {p.get('title', 'N/A')}\n"
             f"   Price: {p.get('price', 'N/A')} | "
@@ -153,14 +149,13 @@ Reply with ONLY the JSON object, no markdown, no extra text.
     raw = _ask(prompt)
 
     try:
-        # Strip markdown code fences the model sometimes wraps around the JSON
-        clean = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-        clean = re.sub(r"\s*```$", "", clean).strip()
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        clean = m.group(0) if m else raw
         result = json.loads(clean)
         idx = int(result["index"]) - 1
-        if 0 <= idx < len(products):
+        if 0 <= idx < len(capped_products):
             return {
-                "product": products[idx],
+                "product": capped_products[idx],
                 "reason":  result.get("reason", "No reason provided."),
             }
     except Exception as e:
@@ -172,7 +167,7 @@ Reply with ONLY the JSON object, no markdown, no extra text.
         except (ValueError, AttributeError):
             return 0.0
 
-    best = max(products, key=_parse_rating)
+    best = max(capped_products, key=_parse_rating)
     return {
         "product": best,
         "reason":  "Recommended based on highest rating (LLM parse failed).",

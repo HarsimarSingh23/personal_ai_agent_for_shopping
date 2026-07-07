@@ -45,15 +45,16 @@ class _RootNavigatorState extends State<_RootNavigator>
     with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
 
-  static const List<Widget> _screens = [
-    HomeScreen(),
-    HistoryScreen(),
-  ];
+  final GlobalKey<HistoryScreenState> _historyKey = GlobalKey<HistoryScreenState>();
 
   void _onTap(int index) {
     if (index == _currentIndex) return;
     HapticFeedback.selectionClick();
     setState(() => _currentIndex = index);
+
+    if (index == 1) {
+      _historyKey.currentState?.reloadIfNeeded();
+    }
   }
 
   @override
@@ -62,7 +63,10 @@ class _RootNavigatorState extends State<_RootNavigator>
       backgroundColor: AppTheme.background,
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: [
+          const HomeScreen(key: ValueKey('home')),
+          HistoryScreen(key: _historyKey),
+        ],
       ),
       bottomNavigationBar: _BottomNav(
         currentIndex: _currentIndex,

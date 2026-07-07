@@ -1,10 +1,3 @@
-"""
-scraper.py — Amazon product scraper for the Personal AI Shopping Agent.
-
-    from scraper import scrape
-    results = scrape("mechanical keyboard")
-    # returns list[dict]: title, price, rating, reviews_count, url
-"""
 
 import json
 import logging
@@ -15,8 +8,7 @@ import time
 import sys
 import os
 import platform
-
-# stdout/stderr encoding is set by the entry-point (agent.py), not here.
+import threading
 
 try:
     import undetected_chromedriver as uc
@@ -44,24 +36,34 @@ AMAZON_BASE    = "https://www.amazon.in"
 MAX_RESULTS    = 10
 PAGE_LOAD_WAIT = 30
 
+_UC_LOCK = threading.Lock()
+
 
 def _detect_chrome_version() -> int:
-    """Auto-detect installed Chrome major version from OS or env var."""
     chrome_ver_env = os.environ.get("CHROME_VERSION", "").strip()
     if chrome_ver_env:
-        return int(chrome_ver_env)
-        
+        if chrome_ver_env.isdigit():
+            return int(chrome_ver_env)
+        else:
+            log.warning(
+                "CHROME_VERSION env var is '%s' (not a number) — ignoring and "
+                "falling back to OS detection.",
+                chrome_ver_env,
+            )
+
     try:
         if platform.system() == "Windows":
-            result = subprocess.run(
-                ["reg", "query",
-                 r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon",
-                 "/v", "version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            match = re.search(r"(\d+)\.\d+", result.stdout)
-            if match:
-                return int(match.group(1))
+            for hive in (
+                r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon",
+                r"HKEY_LOCAL_MACHINE\SOFTWARE\Google\Chrome\BLBeacon",
+            ):
+                result = subprocess.run(
+                    ["reg", "query", hive, "/v", "version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                match = re.search(r"(\d+)\.\d+", result.stdout)
+                if match:
+                    return int(match.group(1))
         else:
             result = subprocess.run(
                 ["google-chrome", "--version"],
@@ -74,8 +76,6 @@ def _detect_chrome_version() -> int:
         pass
     return 148  # fallback if lookup fails
 
-
-CHROME_VERSION = _detect_chrome_version()
 
 _CARD_SELECTORS = [
     "div[data-component-type='s-search-result']",
@@ -121,7 +121,6 @@ _DESKTOP_UAS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7490.110 Safari/537.36",
 ]
 
-# Injected via CDP before any page JS runs — removes Selenium/webdriver fingerprints.
 _STEALTH_JS = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'plugins', {
@@ -147,7 +146,6 @@ def _human_pause(min_s: float = 0.5, max_s: float = 1.5) -> None:
 
 
 def _desktop_ua() -> str:
-    """Return a guaranteed Windows-desktop Chrome user-agent string."""
     try:
         ua = UserAgent(os="windows", browsers=["chrome"])
         candidate = ua.random
@@ -183,8 +181,8 @@ def _safe_attr(card, selectors: list[str], attr: str) -> str | None:
     return None
 
 
-def _is_captcha(driver) -> bool:
-    src = driver.page_source.lower()
+def _is_captcha(driver, page_source: str | None = None) -> bool:
+    src = (page_source if page_source is not None else driver.page_source).lower()
     return any(k in src for k in (
         "captcha", "robot check", "unusual traffic",
         "automated access", "verify you", "are you a human",
@@ -192,6 +190,8 @@ def _is_captcha(driver) -> bool:
 
 
 def _build_driver() -> uc.Chrome:
+    chrome_version = _detect_chrome_version()
+
     ua = _desktop_ua()
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
@@ -205,18 +205,14 @@ def _build_driver() -> uc.Chrome:
     options.add_argument("--disable-gpu")
 
     log.debug("Starting headless Chrome with UA: %s", ua[:80])
-    driver = uc.Chrome(options=options, use_subprocess=True, version_main=CHROME_VERSION)
+    with _UC_LOCK:
+        driver = uc.Chrome(options=options, use_subprocess=True, version_main=chrome_version)
     driver.set_window_size(1366, 768)
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": _STEALTH_JS})
     return driver
 
 
 def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
-    """
-    Search Amazon for *query* and return up to *max_results* products.
-    Returns an empty list on failure — never raises.
-    Each dict has keys: title, price, rating, reviews_count, url, image.
-    """
     results: list[dict] = []
     driver = None
 
@@ -227,7 +223,8 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
         driver.get(AMAZON_BASE)
         _human_pause(2.0, 3.5)
 
-        if _is_captcha(driver):
+        homepage_source = driver.page_source
+        if _is_captcha(driver, homepage_source):
             log.error("CAPTCHA on homepage — cannot proceed in headless mode.")
             return results
 
@@ -252,9 +249,7 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
 
         search_box.clear()
         _human_pause(0.3, 0.7)
-        for char in query:
-            search_box.send_keys(char)
-            time.sleep(random.uniform(0.05, 0.14))
+        search_box.send_keys(query)
         _human_pause(0.5, 1.0)
         search_box.send_keys(Keys.RETURN)
 
@@ -265,7 +260,8 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
                 )
             )
         except TimeoutException:
-            if _is_captcha(driver):
+            results_source = driver.page_source
+            if _is_captcha(driver, results_source):
                 log.error("CAPTCHA on results page — cannot solve in headless mode.")
             else:
                 log.error("Results page timed out. URL: %s", driver.current_url)
@@ -273,7 +269,8 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
 
         _human_pause(0.8, 1.5)
 
-        if _is_captcha(driver):
+        results_source = driver.page_source
+        if _is_captcha(driver, results_source):
             log.error("CAPTCHA detected after results load.")
             return results
 
@@ -332,9 +329,10 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
     finally:
         if driver:
             try:
-                driver.quit()
+                with _UC_LOCK:
+                    driver.quit()
             except Exception:
-                pass  # suppress known WinError 6 on Windows cleanup
+                pass
 
     log.info("Scrape complete — %d products returned.", len(results))
     return results

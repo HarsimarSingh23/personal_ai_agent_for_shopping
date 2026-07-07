@@ -1,17 +1,9 @@
-"""
-flipkart_scraper.py — Lightweight Flipkart scraper using requests + BeautifulSoup.
-
-    from flipkart_scraper import scrape_flipkart
-    results = scrape_flipkart("mechanical keyboard")
-    # returns list[dict]: title, price, rating, reviews_count, url, source
-"""
 
 import logging
 import random
 import time
 from urllib.parse import quote_plus
 
-# stdout/stderr encoding is set by the entry-point (agent.py), not here.
 
 try:
     import requests
@@ -21,6 +13,19 @@ except ImportError:
         "'requests' or 'beautifulsoup4' not found.\n"
         "Run: pip install -r requirements.txt"
     )
+
+try:
+    import lxml  # noqa: F401
+    _PARSER = "lxml"
+except ImportError:
+    import warnings
+    warnings.warn(
+        "lxml is not installed — falling back to html.parser. "
+        "Flipkart CSS selectors may not work correctly. "
+        "Install lxml: pip install lxml",
+        stacklevel=2,
+    )
+    _PARSER = "html.parser"
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +40,14 @@ _USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
 ]
 
-# Selectors are tried in order; Flipkart changes their markup frequently.
+_session = requests.Session()
+_session.headers.update({
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Referer": "https://www.flipkart.com/",
+    "DNT": "1",
+})
+
 _CARD_CONFIGS = [
     {
         "container": "div[data-id]",
@@ -57,15 +69,14 @@ _CARD_CONFIGS = [
     },
 ]
 
+_POPUP_SELECTORS = [
+    "button._2KpZ6l._2doB4z",
+    "button.LbYjBf-geS5jf-fAtFfn",
+]
+
 
 def _headers() -> dict:
-    return {
-        "User-Agent": random.choice(_USER_AGENTS),
-        "Accept-Language": "en-IN,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://www.flipkart.com/",
-        "DNT": "1",
-    }
+    return {"User-Agent": random.choice(_USER_AGENTS)}
 
 
 def _safe_text(tag, selectors: list[str]) -> str | None:
@@ -93,11 +104,19 @@ def _safe_src(tag, selectors: list[str]) -> str | None:
     return None
 
 
+def _dismiss_login_popup(soup: BeautifulSoup) -> BeautifulSoup:
+    for sel in _POPUP_SELECTORS:
+        if soup.select_one(sel):
+            log.warning(
+                "Flipkart: login popup detected in HTML source. "
+                "Product selectors may find fewer results. "
+                "Consider adding a logged-in session cookie or using a headless browser."
+            )
+            break
+    return soup
+
+
 def scrape_flipkart(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
-    """
-    Search Flipkart for *query* and return up to *max_results* products.
-    Returns an empty list on failure — never raises.
-    """
     results: list[dict] = []
     url = FLIPKART_SEARCH.format(query=quote_plus(query))
 
@@ -105,9 +124,12 @@ def scrape_flipkart(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
         log.info("Scraping Flipkart for: '%s'", query)
         time.sleep(random.uniform(0.5, 1.2))
 
-        resp = requests.get(url, headers=_headers(), timeout=REQUEST_TIMEOUT)
+        resp = _session.get(url, headers=_headers(), timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "lxml")
+
+        soup = BeautifulSoup(resp.text, _PARSER)
+
+        soup = _dismiss_login_popup(soup)
 
         cards = []
         config = None

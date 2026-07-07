@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -6,10 +6,17 @@ import '../models/search_response.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
-class ProductDetailScreen extends StatelessWidget {
+class ProductDetailScreen extends StatefulWidget {
   final Product product;
 
   const ProductDetailScreen({super.key, required this.product});
+
+  @override
+  State<ProductDetailScreen> createState() => _ProductDetailScreenState();
+}
+
+class _ProductDetailScreenState extends State<ProductDetailScreen> {
+  Product get product => widget.product;
 
   @override
   Widget build(BuildContext context) {
@@ -34,9 +41,9 @@ class ProductDetailScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   _buildDivider(),
                   const SizedBox(height: 24),
-                  _buildUrlSection(context),
+                  _buildUrlSection(),
                   const SizedBox(height: 32),
-                  _buildCTAButton(context),
+                  _buildCTAButton(),
                   const SizedBox(height: 40),
                 ],
               ).animate().fadeIn(duration: 400.ms).slideY(
@@ -193,7 +200,7 @@ class ProductDetailScreen extends StatelessWidget {
     return Container(height: 1, color: AppTheme.border);
   }
 
-  Widget _buildUrlSection(BuildContext context) {
+  Widget _buildUrlSection() {
     if (!product.hasValidUrl) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,9 +216,11 @@ class ProductDetailScreen extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: () {
-            Clipboard.setData(ClipboardData(text: product.url));
-            ScaffoldMessenger.of(context).showSnackBar(
+          onTap: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            await Clipboard.setData(ClipboardData(text: product.url));
+            if (!context.mounted) return;
+            messenger.showSnackBar(
               const SnackBar(content: Text('Link copied to clipboard!')),
             );
           },
@@ -247,7 +256,7 @@ class ProductDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCTAButton(BuildContext context) {
+  Widget _buildCTAButton() {
     return SizedBox(
       width: double.infinity,
       child: DecoratedBox(
@@ -280,7 +289,16 @@ class ProductDetailScreen extends StatelessWidget {
             ),
           ),
           onPressed: product.hasValidUrl
-              ? () => ApiService.launchProductUrl(product.url)
+              ? () async {
+                  final opened = await ApiService.launchProductUrl(product.url);
+                  if (!opened && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Could not open the product link.'),
+                      ),
+                    );
+                  }
+                }
               : null,
         ),
       ),

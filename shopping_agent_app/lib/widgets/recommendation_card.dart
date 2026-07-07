@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../models/search_response.dart';
@@ -47,8 +47,11 @@ class RecommendationCard extends StatelessWidget {
           children: [
             _buildHeader(),
             const SizedBox(height: 16),
-            if (product.hasImage) _buildProductImage(),
-            const SizedBox(height: 16),
+            // Only render the image AND its bottom gap when an image is available.
+            if (product.hasImage) ...[
+              _buildProductImage(),
+              const SizedBox(height: 16),
+            ],
             _buildProductInfo(),
             const SizedBox(height: 16),
             _buildReasonBox(),
@@ -235,7 +238,16 @@ class RecommendationCard extends StatelessWidget {
             ),
           ),
           onPressed: product.hasValidUrl
-              ? () => ApiService.launchProductUrl(product.url)
+              ? () async {
+                  final opened = await ApiService.launchProductUrl(product.url);
+                  if (!opened && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Could not open the product link.'),
+                      ),
+                    );
+                  }
+                }
               : null,
         ),
       ),

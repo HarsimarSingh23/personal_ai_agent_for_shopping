@@ -1,7 +1,7 @@
 import 'search_response.dart';
 
 class SessionSummary {
-  final String sessionId;
+  final String? sessionId;
   final DateTime timestamp;
   final String queryOriginal;
   final String queryEnglish;
@@ -38,11 +38,11 @@ class SessionSummary {
     try {
       ts = DateTime.parse(json['timestamp'] as String? ?? '');
     } catch (_) {
-      ts = DateTime.now();
+      ts = DateTime.now().toUtc();
     }
 
     return SessionSummary(
-      sessionId:            json['session_id']    as String? ?? '',
+      sessionId:            json['session_id']    as String?,
       timestamp:            ts,
       queryOriginal:        json['query_original'] as String? ?? '',
       queryEnglish:         json['query_english']  as String? ?? '',

@@ -1,9 +1,7 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# AI Shopping Agent — Docker Image
-# ─────────────────────────────────────────────────────────────────────────────
+
 FROM python:3.12-slim
 
-# Install system deps for Chrome + Selenium
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
@@ -27,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome
+
 RUN wget -q -O /tmp/google-chrome.deb \
     https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
@@ -35,25 +33,30 @@ RUN wget -q -O /tmp/google-chrome.deb \
     && rm /tmp/google-chrome.deb \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chrome version env so scraper auto-detects it
-RUN CHROME_VER=$(google-chrome --version | grep -oP '[\d]+' | head -1) && \
-    echo "CHROME_VERSION=$CHROME_VER" >> /etc/environment
+ARG CHROME_VER_ARG
+RUN CHROME_VER_ARG=$(google-chrome --version | grep -oP '[\d]+' | head -1) && \
+    echo "Detected Chrome version: ${CHROME_VER_ARG}"
+ENV CHROME_VERSION=${CHROME_VER_ARG}
 
 WORKDIR /app
 
-# Copy and install Python dependencies
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+
 COPY . .
 
-# Expose API port
+RUN useradd --create-home --shell /bin/false appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+
 EXPOSE 8000
 
-# Health check
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run with 1 worker in production to avoid undetected_chromedriver concurrency and memory issues
+
 CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -31,6 +31,18 @@ class Product {
 
   bool get hasValidUrl => url.isNotEmpty && url != 'N/A';
   bool get hasImage    => image.isNotEmpty && image != 'N/A' && image.startsWith('http');
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Product &&
+          runtimeType == other.runtimeType &&
+          url == other.url &&
+          title == other.title &&
+          source == other.source;
+
+  @override
+  int get hashCode => Object.hash(url, title, source);
 }
 
 class SearchResponse {
