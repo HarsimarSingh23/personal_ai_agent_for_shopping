@@ -66,7 +66,7 @@ def _detect_chrome_version() -> int:
                     return int(match.group(1))
         else:
             result = subprocess.run(
-                ["google-chrome", "--version"],
+                ["google-chrome", "--headless", "--version"],
                 capture_output=True, text=True, timeout=5,
             )
             match = re.search(r"Google Chrome (\d+)\.", result.stdout)
@@ -74,7 +74,7 @@ def _detect_chrome_version() -> int:
                 return int(match.group(1))
     except Exception:
         pass
-    return 148  # fallback if lookup fails
+    return 150  # fallback if lookup fails
 
 
 _CARD_SELECTORS = [
@@ -141,7 +141,7 @@ window.chrome.runtime = window.chrome.runtime || {};
 """
 
 
-def _human_pause(min_s: float = 0.5, max_s: float = 1.5) -> None:
+def _human_pause(min_s: float = 0.1, max_s: float = 0.5) -> None:
     time.sleep(random.uniform(min_s, max_s))
 
 
@@ -203,6 +203,8 @@ def _build_driver() -> uc.Chrome:
     options.add_argument("--disable-plugins-discovery")
     options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
+    options.add_argument("--blink-settings=imagesEnabled=false")
+    options.page_load_strategy = 'eager'
 
     log.debug("Starting headless Chrome with UA: %s", ua[:80])
     with _UC_LOCK:
@@ -219,52 +221,21 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
     try:
         driver = _build_driver()
 
-        log.info("Scraping Amazon for: '%s'", query)
-        driver.get(AMAZON_BASE)
-        _human_pause(2.0, 3.5)
+        from urllib.parse import quote_plus
+        search_url = f"{AMAZON_BASE}/s?k={quote_plus(query)}"
+        log.info("Scraping Amazon directly via: %s", search_url)
+        driver.get(search_url)
 
-        homepage_source = driver.page_source
-        if _is_captcha(driver, homepage_source):
-            log.error("CAPTCHA on homepage — cannot proceed in headless mode.")
+        if _is_captcha(driver):
+            log.error("CAPTCHA detected on search results — cannot proceed in headless mode.")
             return results
-
-        search_box = None
-        for by, sel in [
-            (By.ID,   "twotabsearchtextbox"),
-            (By.NAME, "field-keywords"),
-            (By.CSS_SELECTOR, "input[type='text'][name='field-keywords']"),
-            (By.CSS_SELECTOR, "input.nav-input"),
-        ]:
-            try:
-                search_box = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((by, sel))
-                )
-                break
-            except TimeoutException:
-                continue
-
-        if search_box is None:
-            log.error("Search box not found — Amazon layout may have changed.")
-            return results
-
-        search_box.clear()
-        _human_pause(0.3, 0.7)
-        search_box.send_keys(query)
-        _human_pause(0.5, 1.0)
-        search_box.send_keys(Keys.RETURN)
 
         try:
-            WebDriverWait(driver, PAGE_LOAD_WAIT).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "div[data-component-type='s-search-result']")
-                )
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.s-main-slot"))
             )
         except TimeoutException:
-            results_source = driver.page_source
-            if _is_captcha(driver, results_source):
-                log.error("CAPTCHA on results page — cannot solve in headless mode.")
-            else:
-                log.error("Results page timed out. URL: %s", driver.current_url)
+            log.error("Timed out waiting for Amazon search results to load.")
             return results
 
         _human_pause(0.8, 1.5)

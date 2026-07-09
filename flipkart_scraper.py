@@ -1,184 +1,138 @@
-
+import json
 import logging
-import random
-import time
-from urllib.parse import quote_plus
-
-
-try:
-    import requests
-    from bs4 import BeautifulSoup
-except ImportError:
-    raise ImportError(
-        "'requests' or 'beautifulsoup4' not found.\n"
-        "Run: pip install -r requirements.txt"
-    )
-
-try:
-    import lxml  # noqa: F401
-    _PARSER = "lxml"
-except ImportError:
-    import warnings
-    warnings.warn(
-        "lxml is not installed — falling back to html.parser. "
-        "Flipkart CSS selectors may not work correctly. "
-        "Install lxml: pip install lxml",
-        stacklevel=2,
-    )
-    _PARSER = "html.parser"
+import re
+import requests
+import sys
 
 log = logging.getLogger(__name__)
 
-FLIPKART_BASE   = "https://www.flipkart.com"
-FLIPKART_SEARCH = "https://www.flipkart.com/search?q={query}&otracker=search"
-MAX_RESULTS     = 10
-REQUEST_TIMEOUT = 15
+MAX_RESULTS = 10
 
-_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
-]
-
-_session = requests.Session()
-_session.headers.update({
-    "Accept-Language": "en-IN,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Referer": "https://www.flipkart.com/",
-    "DNT": "1",
-})
-
-_CARD_CONFIGS = [
-    {
-        "container": "div[data-id]",
-        "title":     ["div._4rR01T", "a.s1Q9rs", "div.KzDlHZ", "a.wjcEIp"],
-        "price":     ["div._30jeq3", "div.Nx9bqj", "div._1_WHN1"],
-        "rating":    ["div._3LWZlK", "div.XQDdHH"],
-        "reviews":   ["span._2_R_DZ", "span.Wphh3N"],
-        "link":      ["a._1fQZEK", "a.s1Q9rs", "a.wjcEIp", "a._2rpwqI"],
-        "image":     ["img._396cs4", "img.DByuf4", "img"],
-    },
-    {
-        "container": "div._1AtVbE",
-        "title":     ["div._4rR01T", "a.IRpwTa", "div.s1Q9rs"],
-        "price":     ["div._30jeq3", "div._25b18c div._30jeq3"],
-        "rating":    ["div._3LWZlK"],
-        "reviews":   ["span._2_R_DZ"],
-        "link":      ["a.s1Q9rs", "a._1fQZEK"],
-        "image":     ["img._396cs4", "img._2r_T1I", "img"],
-    },
-]
-
-_POPUP_SELECTORS = [
-    "button._2KpZ6l._2doB4z",
-    "button.LbYjBf-geS5jf-fAtFfn",
-]
-
-
-def _headers() -> dict:
-    return {"User-Agent": random.choice(_USER_AGENTS)}
-
-
-def _safe_text(tag, selectors: list[str]) -> str | None:
-    for sel in selectors:
-        el = tag.select_one(sel)
-        if el and el.get_text(strip=True):
-            return el.get_text(strip=True)
-    return None
-
-
-def _safe_href(tag, selectors: list[str]) -> str | None:
-    for sel in selectors:
-        el = tag.select_one(sel)
-        if el and el.get("href"):
-            href = el["href"]
-            return href if href.startswith("http") else FLIPKART_BASE + href
-    return None
-
-
-def _safe_src(tag, selectors: list[str]) -> str | None:
-    for sel in selectors:
-        el = tag.select_one(sel)
-        if el and el.get("src") and el.get("src").startswith("http"):
-            return el["src"]
-    return None
-
-
-def _dismiss_login_popup(soup: BeautifulSoup) -> BeautifulSoup:
-    for sel in _POPUP_SELECTORS:
-        if soup.select_one(sel):
-            log.warning(
-                "Flipkart: login popup detected in HTML source. "
-                "Product selectors may find fewer results. "
-                "Consider adding a logged-in session cookie or using a headless browser."
-            )
-            break
-    return soup
-
+def _find_products(obj, results=None):
+    if results is None:
+        results = []
+    if isinstance(obj, dict):
+        if 'productInfo' in obj and isinstance(obj['productInfo'], dict) and 'value' in obj['productInfo']:
+            results.append(obj['productInfo']['value'])
+        for k, v in obj.items():
+            _find_products(v, results)
+    elif isinstance(obj, list):
+        for item in obj:
+            _find_products(item, results)
+    return results
 
 def scrape_flipkart(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
-    results: list[dict] = []
-    url = FLIPKART_SEARCH.format(query=quote_plus(query))
+    results = []
+    log.info("Scraping Flipkart (Production API) for: '%s'", query)
+    
+    # 1. Fetch raw HTML using requests with a randomized User Agent, with retries
+    from fake_useragent import UserAgent
+    import requests
+    import time
+    
+    html = ""
+    for attempt in range(3):
+        try:
+            ua = UserAgent(os="windows", browsers=["chrome"]).random
+            url = f"https://www.flipkart.com/search?q={query.replace(' ', '+')}&otracker=search"
+            headers = {
+                'User-Agent': ua,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Cache-Control': 'max-age=0',
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                html = response.text
+                break
+            else:
+                log.warning("Flipkart returned status %s on attempt %d", response.status_code, attempt + 1)
+        except Exception as e:
+            log.warning("Failed to fetch Flipkart HTML via requests on attempt %d: %s", attempt + 1, e)
+            
+        if attempt < 2:
+            time.sleep(1) # wait a bit before retrying
 
+    if not html:
+        log.error("Failed to fetch Flipkart HTML after 3 attempts.")
+        return results
+
+    # 2. Extract JSON state
+    match = re.search(r'window\.__INITIAL_STATE__\s*=\s*(\{.*?\});', html)
+    if not match:
+        log.error("Could not find __INITIAL_STATE__ JSON in Flipkart HTML. Layout might have changed or bot protection is active.")
+        return results
+        
     try:
-        log.info("Scraping Flipkart for: '%s'", query)
-        time.sleep(random.uniform(0.5, 1.2))
-
-        resp = _session.get(url, headers=_headers(), timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-
-        soup = BeautifulSoup(resp.text, _PARSER)
-
-        soup = _dismiss_login_popup(soup)
-
-        cards = []
-        config = None
-        for cfg in _CARD_CONFIGS:
-            cards = soup.select(cfg["container"])
-            valid = [c for c in cards if any(c.select_one(s) for s in cfg["title"])]
-            if valid:
-                cards = valid
-                config = cfg
-                log.info("Flipkart: %d cards via '%s'", len(cards), cfg["container"])
-                break
-
-        if not cards or config is None:
-            log.warning("Flipkart: No product cards found for '%s'", query)
-            return results
-
-        for card in cards:
-            if len(results) >= max_results:
-                break
-            try:
-                title = _safe_text(card, config["title"])
-                if not title:
-                    continue
-
-                price   = _safe_text(card, config["price"])
-                rating  = _safe_text(card, config["rating"])
-                reviews = _safe_text(card, config["reviews"])
-                url_    = _safe_href(card, config["link"])
-                image   = _safe_src(card, config["image"])
-
-                results.append({
-                    "title":         title   or "N/A",
-                    "price":         price   or "N/A",
-                    "rating":        rating  or "N/A",
-                    "reviews_count": reviews or "N/A",
-                    "url":           url_    or "N/A",
-                    "image":         image   or "N/A",
-                    "source":        "flipkart",
-                })
-                log.debug("  [FK %d] %s", len(results), title[:70])
-
-            except Exception as e:
-                log.warning("Flipkart: skipped a card — %s", e)
-                continue
-
-    except requests.exceptions.RequestException as e:
-        log.error("Flipkart request failed: %s", e)
+        state = json.loads(match.group(1))
     except Exception as e:
-        log.error("Flipkart unexpected error: %s", e, exc_info=True)
+        log.error("Failed to parse Flipkart JSON state: %s", e)
+        return results
 
-    log.info("Flipkart scrape complete — %d products returned.", len(results))
+    # 3. Parse products
+    raw_products = _find_products(state)
+    log.info("Found %d raw product objects in Flipkart JSON", len(raw_products))
+    
+    seen_urls = set()
+    for p in raw_products:
+        if len(results) >= max_results:
+            break
+            
+        try:
+            title = p.get('titles', {}).get('title')
+            if not title:
+                continue
+                
+            pricing = p.get('pricing', {})
+            price = pricing.get('finalPrice', {}).get('value')
+            if price is None and 'prices' in pricing:
+                for pr in pricing['prices']:
+                    if not pr.get('strikeOff'):
+                        price = pr.get('value')
+                        break
+            if price is None:
+                continue
+                
+            rating = p.get('rating', {}).get('average', "N/A")
+            reviews = p.get('rating', {}).get('count', "N/A")
+            
+            p_url = p.get('smartUrl') or p.get('baseUrl')
+            if not p_url:
+                continue
+                
+            if p_url in seen_urls:
+                continue
+            seen_urls.add(p_url)
+            
+            image = p.get('media', {}).get('images', [{}])[0].get('url', '')
+            if image:
+                image = image.replace("{@width}", "400").replace("{@height}", "400").replace("{@quality}", "70")
+
+            results.append({
+                "title": str(title),
+                "price": f"₹{price}",
+                "rating": str(rating),
+                "reviews_count": str(reviews),
+                "url": p_url if p_url.startswith("http") else f"https://www.flipkart.com{p_url}",
+                "image": image or "N/A",
+                "source": "flipkart"
+            })
+            log.debug("  [%d] Flipkart -> %s", len(results), title[:60])
+        except Exception as e:
+            log.warning("Error parsing a Flipkart product: %s", e)
+            continue
+            
+    log.info("Scrape complete — %d products returned from Flipkart.", len(results))
     return results
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    query = " ".join(sys.argv[1:]) or "mechanical keyboard"
+    data = scrape_flipkart(query)
+    print(json.dumps(data, indent=2))

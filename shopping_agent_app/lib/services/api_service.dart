@@ -10,7 +10,7 @@ class ApiService {
   ApiService._();
   static final ApiService instance = ApiService._();
 
-  static const Duration _searchTimeout = Duration(seconds: 70);
+  static const Duration _searchTimeout = Duration(seconds: 120);
   static const Duration _defaultTimeout = Duration(seconds: 15);
 
   String get baseUrl {
