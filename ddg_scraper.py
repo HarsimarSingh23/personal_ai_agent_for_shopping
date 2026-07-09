@@ -2,14 +2,16 @@
 import logging
 import re
 import time
+from urllib.parse import quote_plus
 
 
 try:
-    from duckduckgo_search import DDGS
+    # pyrefly: ignore [missing-import]
+    from ddgs import DDGS
 except ImportError:
     raise ImportError(
-        "'duckduckgo-search' not found.\n"
-        "Run: pip install duckduckgo-search"
+        "'ddgs' not found.\n"
+        "Run: pip install ddgs"
     )
 
 log = logging.getLogger(__name__)
@@ -120,7 +122,7 @@ def scrape_ddg(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
                 "rating":        "N/A",
                 "reviews_count": "N/A",
                 "url":           url,
-                "image":         "N/A",
+                "image":         f"https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url={quote_plus(url)}&size=128",
                 "source":        _domain_label(url),
             })
             log.debug("  [DDG] %s — %s", _domain_label(url), title[:60])

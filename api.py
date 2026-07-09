@@ -112,6 +112,14 @@ class SearchRequest(BaseModel):
 def on_startup():
     init_db()
     monitoring.start_dashboard()
+    log.info("Pre-warming Chrome driver to prevent first-request timeout...")
+    try:
+        from scraper import _build_driver
+        driver = _build_driver()
+        driver.quit()
+        log.info("Chrome driver pre-warmed successfully.")
+    except Exception as e:
+        log.warning("Failed to pre-warm Chrome driver: %s", e)
 
 
 @app.get("/health", tags=["ops"])
@@ -153,13 +161,14 @@ def search(request: SearchRequest):
                 "🌐 Translated query: '%s' → '%s'  (%.0fms)",
                 user_input, english_query, (time.perf_counter() - t0) * 1000,
             )
+            log.info("🌐 Translated query: '%s' → '%s'", user_input, english_query)
         except EnvironmentError as e:
             log.error("✗ Translation failed (config): %s", e)
             raise HTTPException(status_code=503, detail=str(e))
         except HTTPException:
             raise
         except Exception as e:
-            log.exception("✗ Translation failed for '%s': %s", user_input, e)
+            log.exception("✗ Translation failed: %s", e)
             raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
         # 2. Parallel scrape with timeout
@@ -202,6 +211,28 @@ def search(request: SearchRequest):
                 log.warning("  ⚠ %-8s scraper timed out after %ds", site, _SCRAPE_TIMEOUT)
 
         combined = amazon_results + flipkart_results + ddg_results
+        
+        # Filter out accessories if the query doesn't ask for them
+        accessory_keywords = ["bag", "case", "cover", "sleeve", "backpack", "charger", "adapter", "stand", "skin", "cable"]
+        q_lower = english_query.lower()
+        wants_accessory = any(k in q_lower for k in accessory_keywords)
+        
+        if not wants_accessory:
+            filtered_combined = []
+            for p in combined:
+                title_lower = p.get("title", "").lower()
+                is_accessory = any(k in title_lower for k in accessory_keywords)
+                if not is_accessory:
+                    filtered_combined.append(p)
+            
+            # Reassign only if filtering didn't remove everything (safety fallback)
+            if len(filtered_combined) > 0:
+                combined = filtered_combined
+                # Rebuild source lists if needed, though they aren't strictly used after this except for logging/saving
+                amazon_results = [p for p in amazon_results if not any(k in p.get("title", "").lower() for k in accessory_keywords)]
+                flipkart_results = [p for p in flipkart_results if not any(k in p.get("title", "").lower() for k in accessory_keywords)]
+                ddg_results = [p for p in ddg_results if not any(k in p.get("title", "").lower() for k in accessory_keywords)]
+
         log.info(
             "📦 Scrape complete for '%s': amazon=%d flipkart=%d web=%d (total=%d)  (%.0fms)",
             english_query, len(amazon_results), len(flipkart_results),

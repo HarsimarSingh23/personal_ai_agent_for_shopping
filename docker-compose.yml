@@ -27,6 +27,7 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+      - "8765:8765"
     environment:
       DATABASE_URL:            postgresql://shopping:${POSTGRES_PASSWORD}@db:5432/shopping_db
       NVIDIA_API_KEY:          ${NVIDIA_API_KEY}
