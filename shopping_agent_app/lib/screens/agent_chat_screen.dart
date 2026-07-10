@@ -6,10 +6,10 @@ import 'search_results_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AgentChatScreen extends StatefulWidget {
-  const AgentChatScreen({Key? key}) : super(key: key);
+  const AgentChatScreen({super.key});
 
   @override
-  _AgentChatScreenState createState() => _AgentChatScreenState();
+  State<AgentChatScreen> createState() => _AgentChatScreenState();
 }
 
 class _AgentChatScreenState extends State<AgentChatScreen> {
@@ -160,21 +160,24 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 4.0),
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
-                      color: isUser ? AppTheme.primary.withOpacity(0.2) : AppTheme.surfaceElevated,
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(16),
-                        topRight: const Radius.circular(16),
-                        bottomLeft: isUser ? const Radius.circular(16) : const Radius.circular(0),
-                        bottomRight: isUser ? const Radius.circular(0) : const Radius.circular(16),
-                      ),
-                      border: Border.all(color: isUser ? AppTheme.primary.withOpacity(0.5) : AppTheme.border),
+                      color: isUser ? AppTheme.primary : AppTheme.surfaceCard,
+                      borderRadius: BorderRadius.circular(20),
+                      border: isUser ? null : Border.all(color: AppTheme.border.withValues(alpha: 0.5)),
+                      boxShadow: [
+                        if (isUser)
+                          BoxShadow(
+                            color: AppTheme.primary.withValues(alpha: 0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          )
+                      ],
                     ),
                     child: Text(
                       msg["content"]!,
                       style: GoogleFonts.inter(
-                        color: AppTheme.textPrimary,
+                        color: isUser ? Colors.white : AppTheme.textPrimary,
                         fontSize: 15,
                       ),
                     ),

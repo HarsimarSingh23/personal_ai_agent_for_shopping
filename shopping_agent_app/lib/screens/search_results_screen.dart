@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+
 import '../models/search_response.dart';
 import '../theme/app_theme.dart';
 import '../widgets/recommendation_card.dart';

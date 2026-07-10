@@ -13,15 +13,14 @@ Your goal is to help the user find the perfect item by asking them conversationa
 Be concise, engaging, and use a friendly tone.
 
 RULES:
-1. You must keep track of what information has been provided.
-2. If you do not have enough information to make a highly targeted search, ask a follow-up question (e.g., "What's your budget?", "Any specific brand?", "What features do you need?").
-3. IMPORTANT: Always try to gather specific constraints (like budget, brand, or key features). Do NOT confirm and search too early if you don't know their budget or key preferences. Ask at least 2 or 3 questions if they start with a vague request like "laptop".
-4. If you ask a confirmation question (e.g., "Just to confirm... is that correct?") and the user confirms (e.g., "yes"), you MUST immediately stop asking questions and set "is_ready_to_search" to true.
-5. Once you have enough information to make a great search, you must STOP asking questions and output a search query.
-6. Your response MUST be a valid JSON object with the following keys:
-   - "message": A string containing your reply to the user. IMPORTANT: If "is_ready_to_search" is true, this message MUST NOT be a question. It must be a short acknowledgment like "Got it! Let me find the best options for you."
-   - "is_ready_to_search": A boolean. True if you have enough info to search (or if the user just confirmed your summary). False if you are still asking questions.
-   - "search_query": A string containing a concise search query (3-6 words) for Amazon/Flipkart. ONLY populate this if is_ready_to_search is True. Otherwise, leave it as an empty string.
+1. Keep track of what information has been provided.
+2. If the user's request is too vague, ask 1 or 2 follow-up questions to gather key preferences (like brand or specific features). Do NOT ask for a budget unless strictly necessary.
+3. If the user provides enough details (e.g., "i7 gaming laptop"), you can search immediately without asking more questions.
+4. If the user confirms a summary with "yes", or if you have enough information, you MUST set "is_ready_to_search" to true.
+5. Your response MUST be a valid JSON object with the following keys:
+   - "message": Your reply. IMPORTANT: If "is_ready_to_search" is true, this message MUST NOT be a question. It must be a short acknowledgment like "Got it! Let me find the best options for you."
+   - "is_ready_to_search": boolean. True if you have enough info to search, False otherwise.
+   - "search_query": string containing a concise search query (3-6 words) for Amazon/Flipkart. ONLY populate this if is_ready_to_search is True.
 
 CONVERSATION HISTORY:
 """
@@ -60,7 +59,31 @@ def process_chat(history: List[Dict[str, str]]) -> Dict:
     prompt += "\n\nOutput only the valid JSON response:"
     
     try:
-        return _get_chat_response(prompt)
+        response = _get_chat_response(prompt)
+        
+        # --- Production Anti-Loop Guardrails ---
+        if not response["is_ready_to_search"] and len(history) >= 2:
+            last_user_msg = history[-1].get("content", "").strip().lower()
+            last_agent_msg = history[-2].get("content", "").strip()
+            
+            # Guardrail 1: If user just confirmed, forcefully break out and search
+            if last_user_msg in ["yes", "yep", "yeah", "correct", "exactly"]:
+                log.info("Guardrail triggered: user confirmed, forcing search.")
+                response["is_ready_to_search"] = True
+                response["message"] = "Got it! Finding the best options for you now..."
+                
+                # Try to extract a query from the agent's last confirmation question
+                clean_query = last_agent_msg.replace("So, you're looking for", "").replace("an ", "").replace("a ", "").replace("?", "").strip()
+                response["search_query"] = clean_query if clean_query else "laptop"
+            
+            # Guardrail 2: If LLM is repeating itself verbatim, force search to break loop
+            elif response["message"].strip() == last_agent_msg:
+                log.info("Guardrail triggered: LLM repeated itself, forcing search.")
+                response["is_ready_to_search"] = True
+                response["message"] = "Let me look that up for you right now."
+                response["search_query"] = last_user_msg
+                
+        return response
     except Exception as e:
         log.error(f"All retries failed for chat_agent: {e}")
         # Fallback if the LLM completely fails 3 times

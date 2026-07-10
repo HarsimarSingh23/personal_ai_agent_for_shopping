@@ -276,7 +276,7 @@ class RecommendationCard extends StatelessWidget {
             ),
             onPressed: () {
               // 1-Click buy goes to success screen
-              import_checkout(context);
+              _navigateToCheckout(context);
             },
             child: const Icon(Icons.flash_on_rounded, size: 20, color: AppTheme.background),
           ),
@@ -286,7 +286,7 @@ class RecommendationCard extends StatelessWidget {
   }
 
   // Helper method since we need the import
-  void import_checkout(BuildContext context) {
+  void _navigateToCheckout(BuildContext context) {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const CheckoutSuccessScreen()),

@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../models/search_response.dart';
-import '../services/api_service.dart';
+
 import '../theme/app_theme.dart';
 import 'checkout_success_screen.dart';
 
