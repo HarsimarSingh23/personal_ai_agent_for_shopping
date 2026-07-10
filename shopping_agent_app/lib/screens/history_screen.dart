@@ -5,6 +5,7 @@ import '../models/session.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/empty_state.dart';
+import 'search_results_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -186,15 +187,26 @@ class _SessionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final rec = session.recommendation;
     return GestureDetector(
-      onTap: rec != null
+      onTap: session.sessionId != null
           ? () async {
-              final opened = await ApiService.launchProductUrl(rec.url);
-              if (!context.mounted) return;
-              if (!opened) {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+              );
+              try {
+                final fullResponse = await ApiService.instance.getSession(session.sessionId!);
+                if (!context.mounted) return;
+                Navigator.pop(context); // dismiss dialog
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SearchResultsScreen(response: fullResponse)),
+                );
+              } catch (e) {
+                if (!context.mounted) return;
+                Navigator.pop(context); // dismiss dialog
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Could not open link. Copy the URL and try manually.'),
-                  ),
+                  SnackBar(content: Text('Could not load session: $e')),
                 );
               }
             }

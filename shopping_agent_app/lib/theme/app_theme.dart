@@ -5,25 +5,25 @@ class AppTheme {
   AppTheme._();
 
   // ── Palette ──────────────────────────────────────────────────────────────
-  static const Color background    = Color(0xFFF8FAFC);
-  static const Color surface       = Color(0xFFFFFFFF);
-  static const Color surfaceCard   = Color(0xFFFFFFFF);
-  static const Color surfaceElevated = Color(0xFFF1F5F9);
-  static const Color border        = Color(0xFFE2E8F0);
-  static const Color borderBright  = Color(0xFFCBD5E1);
+  static const Color background    = Color(0xFF0F0F0F); // Sleek pure dark
+  static const Color surface       = Color(0xFF1A1A1A);
+  static const Color surfaceCard   = Color(0xFF1E1E1E);
+  static const Color surfaceElevated = Color(0xFF2C2C2C);
+  static const Color border        = Color(0xFF333333);
+  static const Color borderBright  = Color(0xFF4D4D4D);
 
-  static const Color primary       = Color(0xFF2563EB); // Blue 600
-  static const Color primaryDark   = Color(0xFF1D4ED8); // Blue 700
-  static const Color accent        = Color(0xFF7C3AED); // Violet 600
-  static const Color accentLight   = Color(0xFF8B5CF6); // Violet 500
+  static const Color primary       = Color(0xFFE0FF00); // Neon yellow/green fashion accent
+  static const Color primaryDark   = Color(0xFFB8D900);
+  static const Color accent        = Color(0xFFFF007F); // Hot pink accent
+  static const Color accentLight   = Color(0xFFFF4D99);
 
   static const Color gold          = Color(0xFFF59E0B);
   static const Color success       = Color(0xFF10B981);
-  static const Color error         = Color(0xFFEF4444);
+  static const Color error         = Color(0xFFFF3333);
 
-  static const Color textPrimary   = Color(0xFF0F172A); // Slate 900
-  static const Color textSecondary = Color(0xFF475569); // Slate 600
-  static const Color textMuted     = Color(0xFF94A3B8); // Slate 400
+  static const Color textPrimary   = Color(0xFFFFFFFF); // White text
+  static const Color textSecondary = Color(0xFFAAAAAA); // Light gray
+  static const Color textMuted     = Color(0xFF777777); // Medium gray
 
   // ── Source badge colors ───────────────────────────────────────────────────
   static const Color amazonColor   = Color(0xFFFF9900);
@@ -38,13 +38,13 @@ class AppTheme {
   );
 
   static const LinearGradient recommendGradient = LinearGradient(
-    colors: [Color(0xFFEFF6FF), Color(0xFFF5F3FF)], // Blue 50 to Violet 50
+    colors: [Color(0xFF1A1A1A), Color(0xFF252525)], 
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient backgroundGradient = LinearGradient(
-    colors: [Color(0xFFF8FAFC), Color(0xFFFFFFFF), Color(0xFFF8FAFC)],
+    colors: [Color(0xFF0F0F0F), Color(0xFF151515), Color(0xFF0F0F0F)],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
@@ -68,10 +68,10 @@ class AppTheme {
 
   // ── ThemeData ─────────────────────────────────────────────────────────────
   static ThemeData get light {
-    final base = ThemeData.light(useMaterial3: true);
+    final base = ThemeData.dark(useMaterial3: true);
     return base.copyWith(
       scaffoldBackgroundColor: background,
-      colorScheme: const ColorScheme.light(
+      colorScheme: const ColorScheme.dark(
         primary: primary,
         secondary: accent,
         surface: surface,

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'theme/app_theme.dart';
-import 'screens/home_screen.dart';
+import 'screens/agent_chat_screen.dart';
 import 'screens/history_screen.dart';
 
 void main() {
@@ -65,7 +65,7 @@ class _RootNavigatorState extends State<_RootNavigator>
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          const HomeScreen(key: ValueKey('home')),
+          const AgentChatScreen(key: ValueKey('home')),
           HistoryScreen(key: _historyKey),
         ],
       ),
@@ -99,7 +99,7 @@ class _BottomNav extends StatelessWidget {
               _NavItem(
                 icon: Icons.search_rounded,
                 activeIcon: Icons.search_rounded,
-                label: 'Search',
+                label: 'Chat',
                 isActive: currentIndex == 0,
                 onTap: () => onTap(0),
               ),
