@@ -42,6 +42,8 @@ from flipkart_scraper import scrape_flipkart
 from ddg_scraper import scrape_ddg
 from llm import translate_query, recommend
 from storage import save_session, load_sessions, load_last_session, load_session_by_id, check_db_connection, init_db
+from chat_agent import process_chat
+from guardrails import mask_credit_card
 
 import monitoring
 
@@ -104,6 +106,13 @@ async def add_request_id(request: Request, call_next):
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=2, max_length=200)
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    history: list[ChatMessage] = Field(..., max_length=50)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Endpoints
@@ -133,6 +142,25 @@ def health():
         "version": "1.0.0",
     }
 
+
+@app.post("/api/chat", tags=["chat"])
+def chat(request: ChatRequest):
+    """
+    Conversational onboarding endpoint for the AI Shopping Agent.
+    Masks PII/Credit Cards before processing.
+    """
+    history_dict = []
+    for msg in request.history:
+        # 1. Guardrail: Mask Credit Card details in the message
+        safe_content = mask_credit_card(msg.content)
+        history_dict.append({"role": msg.role, "content": safe_content})
+        
+    try:
+        response_data = process_chat(history_dict)
+        return response_data
+    except Exception as e:
+        log.exception("Chat processing failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/search", tags=["search"])
 def search(request: SearchRequest):

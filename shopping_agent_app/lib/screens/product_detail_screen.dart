@@ -5,6 +5,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../models/search_response.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import 'checkout_success_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Product product;
@@ -278,28 +279,22 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             padding: const EdgeInsets.symmetric(vertical: 18),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
-          icon: const Icon(Icons.open_in_new_rounded, color: Colors.white, size: 20),
-          label: Text(
-            'OPEN ON ${product.source.toUpperCase()}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-              letterSpacing: 0.8,
+          icon: const Icon(Icons.flash_on_rounded, color: AppTheme.background, size: 24),
+          label: const Text(
+            'BUY WITH 1-CLICK',
+            style: TextStyle(
+              color: AppTheme.background,
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
+              letterSpacing: 1.2,
             ),
           ),
-          onPressed: product.hasValidUrl
-              ? () async {
-                  final opened = await ApiService.launchProductUrl(product.url);
-                  if (!opened && mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Could not open the product link.'),
-                      ),
-                    );
-                  }
-                }
-              : null,
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const CheckoutSuccessScreen()),
+            );
+          },
         ),
       ),
     );

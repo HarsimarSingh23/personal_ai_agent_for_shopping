@@ -44,6 +44,22 @@ class ApiService {
     throw Exception('Search failed: $detail');
   }
 
+  Future<Map<String, dynamic>> chat(List<Map<String, String>> history) async {
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/chat'),
+          headers: _headers,
+          body: jsonEncode({'history': history}),
+        )
+        .timeout(_searchTimeout);
+
+    if (response.statusCode == 200) {
+      return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    }
+    final detail = _extractDetail(response.body);
+    throw Exception('Chat failed: $detail');
+  }
+
 
   Future<List<SessionSummary>> getSessions() async {
     final response = await http
@@ -61,6 +77,18 @@ class ApiService {
     throw Exception('Failed to load sessions: $detail');
   }
 
+  Future<SearchResponse> getSession(String sessionId) async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/sessions/$sessionId'), headers: _headers)
+        .timeout(_defaultTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+      return SearchResponse.fromJson(data);
+    }
+    final detail = _extractDetail(response.body);
+    throw Exception('Failed to load session details: $detail');
+  }
 
   Future<bool> checkHealth() async {
     try {
