@@ -3,10 +3,10 @@ import '../theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class CheckoutSuccessScreen extends StatefulWidget {
-  const CheckoutSuccessScreen({Key? key}) : super(key: key);
+  const CheckoutSuccessScreen({super.key});
 
   @override
-  _CheckoutSuccessScreenState createState() => _CheckoutSuccessScreenState();
+  State<CheckoutSuccessScreen> createState() => _CheckoutSuccessScreenState();
 }
 
 class _CheckoutSuccessScreenState extends State<CheckoutSuccessScreen> with SingleTickerProviderStateMixin {
@@ -88,7 +88,7 @@ class _CheckoutSuccessScreenState extends State<CheckoutSuccessScreen> with Sing
                       Container(
                         padding: const EdgeInsets.all(24),
                         decoration: BoxDecoration(
-                          color: AppTheme.success.withOpacity(0.2),
+                          color: AppTheme.success.withValues(alpha: 0.2),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
