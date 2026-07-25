@@ -2,80 +2,24 @@
 import json
 import logging
 import random
-import re
-import subprocess
-import time
 import sys
-import os
-import platform
-import threading
+import time
+from urllib.parse import quote_plus
 
 try:
-    import undetected_chromedriver as uc
+    from bs4 import BeautifulSoup
 except ImportError:
-    raise ImportError("'undetected_chromedriver' not found. Run: pip install -r requirements.txt")
+    raise ImportError("'beautifulsoup4' not found. Run: pip install beautifulsoup4")
 
 try:
-    from fake_useragent import UserAgent
+    from curl_cffi import requests
 except ImportError:
-    raise ImportError("'fake_useragent' not found. Run: pip install -r requirements.txt")
-
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (
-    TimeoutException,
-    NoSuchElementException,
-    WebDriverException,
-)
+    raise ImportError("'curl_cffi' not found. Run: pip install curl_cffi")
 
 log = logging.getLogger(__name__)
 
 AMAZON_BASE    = "https://www.amazon.in"
 MAX_RESULTS    = 10
-PAGE_LOAD_WAIT = 30
-
-_UC_LOCK = threading.Lock()
-
-
-def _detect_chrome_version() -> int:
-    chrome_ver_env = os.environ.get("CHROME_VERSION", "").strip()
-    if chrome_ver_env:
-        if chrome_ver_env.isdigit():
-            return int(chrome_ver_env)
-        else:
-            log.warning(
-                "CHROME_VERSION env var is '%s' (not a number) — ignoring and "
-                "falling back to OS detection.",
-                chrome_ver_env,
-            )
-
-    try:
-        if platform.system() == "Windows":
-            for hive in (
-                r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon",
-                r"HKEY_LOCAL_MACHINE\SOFTWARE\Google\Chrome\BLBeacon",
-            ):
-                result = subprocess.run(
-                    ["reg", "query", hive, "/v", "version"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                match = re.search(r"(\d+)\.\d+", result.stdout)
-                if match:
-                    return int(match.group(1))
-        else:
-            result = subprocess.run(
-                ["google-chrome", "--headless", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            match = re.search(r"Google Chrome (\d+)\.", result.stdout)
-            if match:
-                return int(match.group(1))
-    except Exception:
-        pass
-    return 150  # fallback if lookup fails
-
 
 _CARD_SELECTORS = [
     "div[data-component-type='s-search-result']",
@@ -115,212 +59,160 @@ _FIELD_SELECTORS = {
     ],
 }
 
-_DESKTOP_UAS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7490.110 Safari/537.36",
-]
-
-_STEALTH_JS = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-Object.defineProperty(navigator, 'plugins', {
-    get: () => {
-        const arr = [
-            { name: 'Chrome PDF Plugin',   filename: 'internal-pdf-viewer' },
-            { name: 'Chrome PDF Viewer',   filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-            { name: 'Native Client',       filename: 'internal-nacl-plugin' },
-        ];
-        arr.__proto__ = PluginArray.prototype;
-        return arr;
-    }
-});
-Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-window.chrome = window.chrome || {};
-window.chrome.runtime = window.chrome.runtime || {};
-"""
-
-
-def _human_pause(min_s: float = 0.1, max_s: float = 0.5) -> None:
-    time.sleep(random.uniform(min_s, max_s))
-
-
-def _desktop_ua() -> str:
-    try:
-        ua = UserAgent(os="windows", browsers=["chrome"])
-        candidate = ua.random
-        bad = ("Android", "iPhone", "iPad", "Mobile", "Pixel", "arm")
-        if not any(k in candidate for k in bad):
-            return candidate
-    except Exception:
-        pass
-    return random.choice(_DESKTOP_UAS)
-
 
 def _safe_text(card, selectors: list[str]) -> str | None:
     for sel in selectors:
-        try:
-            el = card.find_element(By.CSS_SELECTOR, sel)
-            text = el.get_attribute("innerText") or el.text
-            if text and text.strip():
-                return text.strip()
-        except NoSuchElementException:
-            continue
+        el = card.select_one(sel)
+        if el:
+            text = el.get_text(strip=True)
+            if text:
+                return text
     return None
 
 
 def _safe_attr(card, selectors: list[str], attr: str) -> str | None:
     for sel in selectors:
-        try:
-            el = card.find_element(By.CSS_SELECTOR, sel)
-            val = el.get_attribute(attr)
+        el = card.select_one(sel)
+        if el:
+            val = el.get(attr)
             if val and val.strip():
                 return val.strip()
-        except NoSuchElementException:
-            continue
     return None
 
 
-def _is_captcha(driver, page_source: str | None = None) -> bool:
-    src = (page_source if page_source is not None else driver.page_source).lower()
+def _is_captcha(html: str) -> bool:
+    src = html.lower()
     return any(k in src for k in (
         "captcha", "robot check", "unusual traffic",
         "automated access", "verify you", "are you a human",
     ))
 
 
-def _build_driver() -> uc.Chrome:
-    chrome_version = _detect_chrome_version()
-
-    ua = _desktop_ua()
-    options = uc.ChromeOptions()
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument(f"--user-agent={ua}")
-    options.add_argument("--window-size=1366,768")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-plugins-discovery")
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--blink-settings=imagesEnabled=false")
-    options.page_load_strategy = 'eager'
-
-    log.debug("Starting headless Chrome with UA: %s", ua[:80])
-    with _UC_LOCK:
-        driver = uc.Chrome(options=options, use_subprocess=True, version_main=chrome_version)
-    driver.set_window_size(1366, 768)
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": _STEALTH_JS})
-    return driver
-
-
 def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
     results: list[dict] = []
-    driver = None
+    
+    search_url = f"{AMAZON_BASE}/s?k={quote_plus(query)}"
+    log.info("Scraping Amazon via curl_cffi: %s", search_url)
 
-    try:
-        driver = _build_driver()
+    # Use a session to maintain cookies from JS challenges
+    session = requests.Session(impersonate="safari15_5")
 
-        from urllib.parse import quote_plus
-        search_url = f"{AMAZON_BASE}/s?k={quote_plus(query)}"
-        log.info("Scraping Amazon directly via: %s", search_url)
-        driver.get(search_url)
-
-        if _is_captcha(driver):
-            log.error("CAPTCHA detected on search results — cannot proceed in headless mode.")
-            return results
-
+    for attempt in range(1, 4):
         try:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.s-main-slot"))
-            )
-        except TimeoutException:
-            log.error("Timed out waiting for Amazon search results to load.")
-            return results
+            log.info("Attempt %d of 3...", attempt)
+            response = session.get(search_url, timeout=15)
+            html = response.text
+            
+            # Check for Akamai Interstitial Challenge
+            if "triggerInterstitialChallenge" in html:
+                log.warning("Akamai Interstitial challenge detected. Attempting to solve...")
+                import re
+                math_match = re.search(r'var i = (\d+);\s*var j = i \+ Number\("(\d+)" \+ "(\d+)"\);', html)
+                if math_match:
+                    j_val = int(math_match.group(1)) + int(math_match.group(2) + math_match.group(3))
+                    bm_match = re.search(r'"bm-verify":\s*"([^"]+)"', html)
+                    if bm_match:
+                        post_data = {"bm-verify": bm_match.group(1), "pow": j_val}
+                        session.post("https://www.amazon.in/_sec/verify?provider=interstitial", json=post_data, timeout=15)
+                        # Fetch the page again now that we have the clearance cookie
+                        response = session.get(search_url, timeout=15)
+                        html = response.text
+                        log.info("Solved interstitial challenge.")
+                    else:
+                        log.warning("Could not find bm-verify payload.")
+                else:
+                    log.warning("Could not parse JS math problem.")
 
-        _human_pause(0.8, 1.5)
-
-        results_source = driver.page_source
-        if _is_captcha(driver, results_source):
-            log.error("CAPTCHA detected after results load.")
-            return results
-
-        cards = []
-        for sel in _CARD_SELECTORS:
-            cards = driver.find_elements(By.CSS_SELECTOR, sel)
-            if cards:
-                break
-
-        if not cards:
-            log.error("No product cards found. URL: %s", driver.current_url)
-            return results
-
-        log.info("Found %d cards — extracting top %d", len(cards), max_results)
-
-        seen: set[str] = set()
-        for card in cards:
-            if len(results) >= max_results:
-                break
-            asin = card.get_attribute("data-asin")
-            if not asin or asin in seen:
+            if response.status_code == 503:
+                log.warning("Got 503 Service Unavailable.")
+                if _is_captcha(html):
+                    log.warning("CAPTCHA detected in 503 response on attempt %d. Retrying...", attempt)
+                time.sleep(random.uniform(2, 4))
                 continue
-            seen.add(asin)
+                
+            if _is_captcha(html):
+                log.warning("CAPTCHA detected on attempt %d. Retrying...", attempt)
+                time.sleep(random.uniform(2, 4))
+                continue
 
-            try:
-                title = _safe_text(card, _FIELD_SELECTORS["title"])
-                if not title:
+            soup = BeautifulSoup(html, "html.parser")
+
+            cards = []
+            for sel in _CARD_SELECTORS:
+                cards = soup.select(sel)
+                if cards:
+                    break
+
+            if not cards:
+                log.error("No product cards found. Amazon may have changed its markup.")
+                time.sleep(random.uniform(2, 4))
+                continue
+
+            log.info("Found %d cards — extracting top %d", len(cards), max_results)
+
+            seen: set[str] = set()
+            for card in cards:
+                if len(results) >= max_results:
+                    break
+                asin = card.get("data-asin")
+                if not asin or asin in seen:
+                    continue
+                seen.add(asin)
+
+                try:
+                    title = _safe_text(card, _FIELD_SELECTORS["title"])
+                    if not title:
+                        continue
+
+                    price   = _safe_text(card, _FIELD_SELECTORS["price"])
+                    rating  = _safe_text(card, _FIELD_SELECTORS["rating"])
+                    reviews = _safe_text(card, _FIELD_SELECTORS["reviews_count"])
+                    href    = _safe_attr(card, _FIELD_SELECTORS["url"], "href")
+                    url     = href if (href and href.startswith("http")) \
+                              else (AMAZON_BASE + href if href else None)
+                    img_src = _safe_attr(card, _FIELD_SELECTORS["image"], "src")
+
+                    results.append({
+                        "title":         title   or "N/A",
+                        "price":         price   or "N/A",
+                        "rating":        rating  or "N/A",
+                        "reviews_count": reviews or "N/A",
+                        "url":           url     or "N/A",
+                        "image":         img_src or "N/A",
+                    })
+                    log.debug("  [%d] %s", len(results), title[:70])
+
+                except Exception as e:
+                    log.warning("Skipped a card: %s", e)
                     continue
 
-                price   = _safe_text(card, _FIELD_SELECTORS["price"])
-                rating  = _safe_text(card, _FIELD_SELECTORS["rating"])
-                reviews = _safe_text(card, _FIELD_SELECTORS["reviews_count"])
-                href    = _safe_attr(card, _FIELD_SELECTORS["url"], "href")
-                url     = href if (href and href.startswith("http")) \
-                          else (AMAZON_BASE + href if href else None)
-                img_src = _safe_attr(card, _FIELD_SELECTORS["image"], "src")
+            if results:
+                break
 
-                results.append({
-                    "title":         title   or "N/A",
-                    "price":         price   or "N/A",
-                    "rating":        rating  or "N/A",
-                    "reviews_count": reviews or "N/A",
-                    "url":           url     or "N/A",
-                    "image":         img_src or "N/A",
-                })
-                log.debug("  [%d] %s", len(results), title[:70])
-
-            except Exception as e:
-                log.warning("Skipped a card: %s", e)
-                continue
-
-    except WebDriverException as e:
-        log.error("WebDriver error: %s", e)
-    except Exception as e:
-        log.error("Unexpected scraper error: %s", e, exc_info=True)
-    finally:
-        if driver:
-            try:
-                with _UC_LOCK:
-                    driver.quit()
-            except Exception:
-                pass
+        except Exception as e:
+            log.error("Error on attempt %d: %s", attempt, e)
+            time.sleep(random.uniform(2, 4))
 
     log.info("Scrape complete — %d products returned.", len(results))
     return results
 
 
 if __name__ == "__main__":
+    if sys.stdout.encoding.lower() != 'utf-8':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  [%(levelname)s]  %(message)s",
         datefmt="%H:%M:%S",
     )
 
-    query = " ".join(sys.argv[1:]) or "mechanical keyboard"
-    data  = scrape(query)
+    query_str = " ".join(sys.argv[1:]) or "mechanical keyboard"
+    scraped_data = scrape(query_str)
 
     print(f"\n{'='*60}")
-    print(f"  {len(data)} results for: '{query}'")
+    print(f"  {len(scraped_data)} results for: '{query_str}'")
     print(f"{'='*60}\n")
-    print(json.dumps(data, indent=4, ensure_ascii=False))
+    print(json.dumps(scraped_data, indent=4, ensure_ascii=False))
     print(f"\n{'='*60}\n")
