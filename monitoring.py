@@ -45,7 +45,7 @@ def start_dashboard() -> None:
     port = int(os.getenv("AGENT_MONITOR_PORT", "8765"))
     open_browser = os.getenv("AGENT_MONITOR_OPEN", "0") == "1"
     try:
-        cdb.serve(port=port, host="127.0.0.1", open_browser=open_browser, block=False)
+        cdb.serve(port=port, host="0.0.0.0", open_browser=open_browser, block=False)
         _dashboard_started = True
         log.info("📊 AgentMonitor dashboard live at http://127.0.0.1:%d", port)
     except Exception as e:  # a taken port shouldn't kill the API

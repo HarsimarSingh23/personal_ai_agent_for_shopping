@@ -1,17 +1,11 @@
-"""
-storage.py — Persistent session storage for the AI Shopping Agent.
-
-Supports both PostgreSQL (production via DATABASE_URL env var)
-and SQLite (local development fallback).
-"""
 
 import logging
 import os
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, Column, String, DateTime, JSON, text
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Column, String, DateTime, JSON, Integer, text
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from sqlalchemy.pool import NullPool, QueuePool
 from dotenv import load_dotenv
 
@@ -19,61 +13,74 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Database URL — PostgreSQL (production) or SQLite (dev fallback)
-# ──────────────────────────────────────────────────────────────────────────────
-_DATABASE_URL = os.getenv("DATABASE_URL")
 
-if _DATABASE_URL:
-    # PostgreSQL — use connection pool
-    log.info("Storage: connecting to PostgreSQL")
-    engine = create_engine(
-        _DATABASE_URL,
-        poolclass=QueuePool,
-        pool_size=5,
-        max_overflow=10,
-        pool_pre_ping=True,          # detect stale connections
-        pool_recycle=300,            # recycle connections every 5 min
-        echo=False,
-    )
-else:
-    # SQLite fallback for local development
-    _RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(_RESULTS_DIR, exist_ok=True)
-    _DB_FILE = os.path.join(_RESULTS_DIR, "sessions.db")
-    log.info("Storage: using SQLite fallback at %s", _DB_FILE)
-    engine = create_engine(
-        f"sqlite:///{_DB_FILE}",
-        connect_args={"check_same_thread": False},
-        poolclass=NullPool,
-    )
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = None          # type: ignore[assignment]
+SessionLocal = None    # type: ignore[assignment]
 Base = declarative_base()
 
+_DATABASE_URL = os.getenv("DATABASE_URL")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# ORM Model
-# ──────────────────────────────────────────────────────────────────────────────
+
+
 class SessionRecord(Base):
     __tablename__ = "sessions"
 
     session_id     = Column(String, primary_key=True, index=True)
-    timestamp      = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    timestamp      = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=text("now()"),
+        nullable=False,
+    )
     query_original = Column(String, nullable=False)
     query_english  = Column(String, nullable=False)
     results        = Column(JSON, nullable=False)
     recommendation = Column(JSON, nullable=True)
 
 
-def init_db():
+
+def init_db() -> None:
+
+    global engine, SessionLocal
+
+    if _DATABASE_URL:
+        log.info("Storage: connecting to PostgreSQL")
+        engine = create_engine(
+            _DATABASE_URL,
+            poolclass=QueuePool,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            echo=False,
+        )
+    else:
+        _results_dir = os.path.join(os.path.dirname(__file__), "results")
+        os.makedirs(_results_dir, exist_ok=True)
+        _db_file = os.path.join(_results_dir, "sessions.db")
+        log.info("Storage: using SQLite fallback at %s", _db_file)
+        engine = create_engine(
+            f"sqlite:///{_db_file}",
+            connect_args={"check_same_thread": False},
+            poolclass=NullPool,
+        )
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
     log.info("Storage: initializing database tables")
     Base.metadata.create_all(bind=engine)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────────────
+
+def _require_db() -> Session:
+    if SessionLocal is None:
+        raise RuntimeError(
+            "Database not initialised. Call storage.init_db() at application startup."
+        )
+    return SessionLocal()
+
+
 def _to_dict(record: SessionRecord) -> dict:
     return {
         "session_id":     record.session_id,
@@ -85,27 +92,15 @@ def _to_dict(record: SessionRecord) -> dict:
     }
 
 
-def _get_db():
-    """Context-managed DB session."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Public API
-# ──────────────────────────────────────────────────────────────────────────────
 def save_session(
-    query_original:  str,
-    query_english:   str,
-    amazon_results:  list[dict],
+    query_original:   str,
+    query_english:    str,
+    amazon_results:   list[dict],
     flipkart_results: list[dict],
-    recommendation:  dict,
-    ddg_results:     list[dict] | None = None,
+    recommendation:   dict,
+    ddg_results:      list[dict] | None = None,
 ) -> str:
-    """Persist a search session and return its session_id."""
     session_id = str(uuid.uuid4())
     results_json = {
         "amazon":   amazon_results,
@@ -113,7 +108,7 @@ def save_session(
         "web":      ddg_results or [],
     }
 
-    db = SessionLocal()
+    db = _require_db()
     try:
         record = SessionRecord(
             session_id=session_id,
@@ -128,18 +123,19 @@ def save_session(
         return session_id
     except Exception:
         db.rollback()
+        log.error("Failed to save session — rolled back", exc_info=True)
         raise
     finally:
         db.close()
 
 
-def load_sessions() -> list[dict]:
-    """Return all saved sessions, newest first."""
-    db = SessionLocal()
+def load_sessions(limit: int = 100) -> list[dict]:
+    db = _require_db()
     try:
         records = (
             db.query(SessionRecord)
             .order_by(SessionRecord.timestamp.desc())
+            .limit(limit)
             .all()
         )
         return [_to_dict(r) for r in records]
@@ -148,8 +144,7 @@ def load_sessions() -> list[dict]:
 
 
 def load_last_session() -> dict | None:
-    """Return the most recent session, or None."""
-    db = SessionLocal()
+    db = _require_db()
     try:
         record = (
             db.query(SessionRecord)
@@ -162,8 +157,7 @@ def load_last_session() -> dict | None:
 
 
 def load_session_by_id(session_id: str) -> dict | None:
-    """Return a single session by ID, or None if not found."""
-    db = SessionLocal()
+    db = _require_db()
     try:
         record = db.query(SessionRecord).filter(
             SessionRecord.session_id == session_id
@@ -174,7 +168,8 @@ def load_session_by_id(session_id: str) -> dict | None:
 
 
 def check_db_connection() -> bool:
-    """Verify the database is reachable. Used by /health endpoint."""
+    if engine is None:
+        return False
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))

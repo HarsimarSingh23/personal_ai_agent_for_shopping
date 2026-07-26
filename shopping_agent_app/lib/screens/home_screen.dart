@@ -20,7 +20,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _controller = TextEditingController();
-  final ApiService _api = ApiService();
+  final ApiService _api = ApiService.instance;
   final ScrollController _scroll = ScrollController();
 
   bool _isLoading = false;
@@ -28,7 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   SourceFilter _filter = SourceFilter.all;
 
-  // ── Search ────────────────────────────────────────────────────────────────
+
   Future<void> _search() async {
     final query = _controller.text.trim();
     if (query.isEmpty) return;
@@ -45,12 +45,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _response = res;
         _isLoading = false;
       });
-      // Scroll to top of results
-      if (_scroll.hasClients) {
-        _scroll.animateTo(0,
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.animateTo(
+            0,
             duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutCubic);
-      }
+            curve: Curves.easeOutCubic,
+          );
+        }
+      });
     } catch (e) {
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');
@@ -59,7 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ── Filtered products ─────────────────────────────────────────────────────
+
   List<Product> get _filteredProducts {
     if (_response == null) return [];
     return switch (_filter) {
@@ -70,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
     };
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -148,7 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
       controller: _scroll,
       physics: const BouncingScrollPhysics(),
       slivers: [
-        // Recommendation card
+
         if (_response!.recommendation != null)
           SliverToBoxAdapter(
             child: Padding(
@@ -160,7 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-        // Section label
+
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
@@ -185,7 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
 
-        // Source filter chips
+
         SliverToBoxAdapter(
           child: SourceFilterBar(
             selected: _filter,
@@ -198,7 +201,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         const SliverToBoxAdapter(child: SizedBox(height: 12)),
 
-        // Product list
+
         if (products.isEmpty)
           const SliverFillRemaining(
             child: EmptyState(type: EmptyStateType.noResults),
