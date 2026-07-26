@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../models/search_response.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../screens/checkout_success_screen.dart';
 
 class RecommendationCard extends StatelessWidget {
   final Product product;
@@ -47,8 +48,11 @@ class RecommendationCard extends StatelessWidget {
           children: [
             _buildHeader(),
             const SizedBox(height: 16),
-            if (product.hasImage) _buildProductImage(),
-            const SizedBox(height: 16),
+            // Only render the image AND its bottom gap when an image is available.
+            if (product.hasImage) ...[
+              _buildProductImage(),
+              const SizedBox(height: 16),
+            ],
             _buildProductInfo(),
             const SizedBox(height: 16),
             _buildReasonBox(),
@@ -203,42 +207,89 @@ class RecommendationCard extends StatelessWidget {
   }
 
   Widget _buildCTAButton(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: AppTheme.primaryGradient,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primary.withValues(alpha: 0.35),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
+    return Row(
+      children: [
+        Expanded(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: AppTheme.primaryGradient,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primary.withValues(alpha: 0.35),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          icon: const Icon(Icons.open_in_new_rounded, size: 18, color: Colors.white),
-          label: const Text(
-            'VIEW BEST DEAL',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-              letterSpacing: 1,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.open_in_new_rounded, size: 18, color: Colors.white),
+              label: const Text(
+                'VIEW DEAL',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  letterSpacing: 1,
+                ),
+              ),
+              onPressed: product.hasValidUrl
+                  ? () async {
+                      final opened = await ApiService.launchProductUrl(product.url);
+                      if (!opened && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not open the product link.'),
+                          ),
+                        );
+                      }
+                    }
+                  : null,
             ),
           ),
-          onPressed: product.hasValidUrl
-              ? () => ApiService.launchProductUrl(product.url)
-              : null,
         ),
-      ),
+        const SizedBox(width: 12),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppTheme.gold,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.gold.withValues(alpha: 0.35),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: () {
+              // 1-Click buy goes to success screen
+              _navigateToCheckout(context);
+            },
+            child: const Icon(Icons.flash_on_rounded, size: 20, color: AppTheme.background),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Helper method since we need the import
+  void _navigateToCheckout(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CheckoutSuccessScreen()),
     );
   }
 }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 
 class AnimatedSearchBar extends StatefulWidget {
@@ -81,6 +81,9 @@ class _AnimatedSearchBarState extends State<AnimatedSearchBar> {
                 fontSize: 15,
                 fontWeight: FontWeight.w400,
               ),
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(256),
+              ],
               decoration: InputDecoration(
                 hintText: 'Search in Hindi, Punjabi, or English…',
                 hintStyle: const TextStyle(

@@ -16,6 +16,7 @@ import json
 import logging
 import threading
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 load_dotenv()
 
@@ -36,7 +37,7 @@ _GEMINI_MODEL_PRIORITY = [
 
 # ── NVIDIA config ─────────────────────────────────────────────────────────────
 _NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-_NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+_NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct")
 _NVIDIA_MAX_TOKENS = int(os.getenv("NVIDIA_MAX_TOKENS", "16384"))
 
 _client = None
@@ -125,8 +126,13 @@ def _get_nvidia_client():
             )
 
         try:
+            # pyrefly: ignore [missing-import]
             from openai import OpenAI
-            _client = OpenAI(base_url=_NVIDIA_BASE_URL, api_key=api_key)
+            _client = OpenAI(
+                base_url=_NVIDIA_BASE_URL,
+                api_key=api_key,
+                timeout=15.0
+            )
             log.info("NVIDIA client ready (model: %s)", _NVIDIA_MODEL)
         except ImportError:
             raise ImportError("'openai' not found. Run: pip install openai")
@@ -173,6 +179,12 @@ def _ask(prompt: str) -> str:
     )
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=True
+)
 def translate_query(raw_input: str) -> str:
     """
     Translate a natural-language product request (any language) into a
@@ -199,6 +211,12 @@ English search query:"""
     return query
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=True
+)
 def recommend(original_query: str, products: list[dict]) -> dict:
     """
     Pick the best product from a combined list and explain why.

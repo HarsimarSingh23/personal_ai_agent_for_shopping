@@ -1,20 +1,22 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import '../models/session.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/empty_state.dart';
+import 'search_results_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
   @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
+  State<HistoryScreen> createState() => HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> {
-  final ApiService _api = ApiService();
+class HistoryScreenState extends State<HistoryScreen>
+    with WidgetsBindingObserver {
+  final ApiService _api = ApiService.instance;
   List<SessionSummary>? _sessions;
   bool _isLoading = true;
   String? _error;
@@ -22,21 +24,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void reloadIfNeeded() {
+    if (!_isLoading) _load();
+  }
+
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _error = null;
     });
     try {
       final sessions = await _api.getSessions();
+      if (!mounted) return;
       setState(() {
         _sessions = sessions;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');
         _isLoading = false;
@@ -157,21 +173,43 @@ class _SessionTile extends StatelessWidget {
   const _SessionTile({required this.session, required this.index});
 
   String _formatDate(DateTime dt) {
-    final now = DateTime.now();
-    final diff = now.difference(dt);
+    final now = DateTime.now().toUtc();
+    final utcDt = dt.isUtc ? dt : dt.toUtc();
+    final diff = now.difference(utcDt);
     if (diff.inSeconds < 60) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays < 7) return '${diff.inDays}d ago';
-    return DateFormat('MMM d, yyyy').format(dt);
+    return DateFormat('MMM d, yyyy').format(dt.toLocal());
   }
 
   @override
   Widget build(BuildContext context) {
     final rec = session.recommendation;
     return GestureDetector(
-      onTap: rec != null
-          ? () => ApiService.launchProductUrl(rec.url)
+      onTap: session.sessionId != null
+          ? () async {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+              );
+              try {
+                final fullResponse = await ApiService.instance.getSession(session.sessionId!);
+                if (!context.mounted) return;
+                Navigator.pop(context); // dismiss dialog
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SearchResultsScreen(response: fullResponse)),
+                );
+              } catch (e) {
+                if (!context.mounted) return;
+                Navigator.pop(context); // dismiss dialog
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not load session: $e')),
+                );
+              }
+            }
           : null,
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
@@ -185,7 +223,6 @@ class _SessionTile extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Query + time
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -232,7 +269,6 @@ class _SessionTile extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              // Stats row
               Row(
                 children: [
                   _StatChip(

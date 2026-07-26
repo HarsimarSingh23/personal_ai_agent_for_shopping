@@ -1,18 +1,23 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../models/search_response.dart';
 import '../models/session.dart';
 
 class ApiService {
+
+  ApiService._();
+  static final ApiService instance = ApiService._();
+
   static const Duration _searchTimeout = Duration(seconds: 120);
   static const Duration _defaultTimeout = Duration(seconds: 15);
 
   String get baseUrl {
     if (kIsWeb) return 'http://127.0.0.1:8000/api';
-    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:8000/api';
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'http://10.0.2.2:8000/api';
+    }
     return 'http://127.0.0.1:8000/api';
   }
 
@@ -21,7 +26,7 @@ class ApiService {
     'Accept': 'application/json',
   };
 
-  // ── Search ────────────────────────────────────────────────────────────────
+
   Future<SearchResponse> search(String query) async {
     final response = await http
         .post(
@@ -39,7 +44,23 @@ class ApiService {
     throw Exception('Search failed: $detail');
   }
 
-  // ── Sessions ──────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> chat(List<Map<String, String>> history) async {
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/chat'),
+          headers: _headers,
+          body: jsonEncode({'history': history}),
+        )
+        .timeout(_searchTimeout);
+
+    if (response.statusCode == 200) {
+      return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    }
+    final detail = _extractDetail(response.body);
+    throw Exception('Chat failed: $detail');
+  }
+
+
   Future<List<SessionSummary>> getSessions() async {
     final response = await http
         .get(Uri.parse('$baseUrl/sessions'), headers: _headers)
@@ -52,10 +73,23 @@ class ApiService {
           .map(SessionSummary.fromJson)
           .toList();
     }
-    throw Exception('Failed to load sessions');
+    final detail = _extractDetail(response.body);
+    throw Exception('Failed to load sessions: $detail');
   }
 
-  // ── Health ────────────────────────────────────────────────────────────────
+  Future<SearchResponse> getSession(String sessionId) async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/sessions/$sessionId'), headers: _headers)
+        .timeout(_defaultTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+      return SearchResponse.fromJson(data);
+    }
+    final detail = _extractDetail(response.body);
+    throw Exception('Failed to load session details: $detail');
+  }
+
   Future<bool> checkHealth() async {
     try {
       final response = await http
@@ -67,7 +101,7 @@ class ApiService {
     }
   }
 
-  // ── URL Launcher ──────────────────────────────────────────────────────────
+
   static Future<bool> launchProductUrl(String url) async {
     if (url.isEmpty || url == 'N/A') return false;
     final uri = Uri.tryParse(url);
@@ -79,7 +113,7 @@ class ApiService {
     }
   }
 
-  // ── Helper ────────────────────────────────────────────────────────────────
+
   String _extractDetail(String body) {
     try {
       final json = jsonDecode(body) as Map<String, dynamic>;

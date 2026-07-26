@@ -1,19 +1,15 @@
-version: "3.9"
 
 services:
-  # ─────────────────────────────────────────────────────────────────────────
-  # PostgreSQL 16 — persistent database
-  # ─────────────────────────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: shopping_db
     restart: unless-stopped
     environment:
       POSTGRES_USER:     shopping
-      POSTGRES_PASSWORD: shopping
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB:       shopping_db
     ports:
-      - "5432:5432"          # exposed for local dev tools (pgAdmin, DBeaver)
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,9 +19,6 @@ services:
       retries: 5
       start_period: 10s
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # FastAPI Shopping Agent API
-  # ─────────────────────────────────────────────────────────────────────────
   api:
     build:
       context: .
@@ -34,13 +27,12 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+      - "8765:8765"
     environment:
-      DATABASE_URL:            postgresql://shopping:shopping@db:5432/shopping_db
-      GEMINI_API_KEY:          ${GEMINI_API_KEY}
+      DATABASE_URL:            postgresql://shopping:${POSTGRES_PASSWORD}@db:5432/shopping_db
+      NVIDIA_API_KEY:          ${NVIDIA_API_KEY}
       ALLOWED_ORIGINS:         ${ALLOWED_ORIGINS:-*}
       SCRAPE_TIMEOUT_SECONDS:  ${SCRAPE_TIMEOUT_SECONDS:-60}
-      # Tell Chrome it's running inside Docker (no sandbox)
-      CHROME_VERSION:          ""
     depends_on:
       db:
         condition: service_healthy
@@ -51,7 +43,7 @@ services:
       retries: 3
       start_period: 20s
     volumes:
-      - ./results:/app/results   # persist any local files written by scrapers
+      - ./results:/app/results
 
 volumes:
   postgres_data:

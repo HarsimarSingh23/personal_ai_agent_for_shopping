@@ -1,15 +1,23 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../models/search_response.dart';
-import '../services/api_service.dart';
-import '../theme/app_theme.dart';
 
-class ProductDetailScreen extends StatelessWidget {
+import '../theme/app_theme.dart';
+import 'checkout_success_screen.dart';
+
+class ProductDetailScreen extends StatefulWidget {
   final Product product;
 
   const ProductDetailScreen({super.key, required this.product});
+
+  @override
+  State<ProductDetailScreen> createState() => _ProductDetailScreenState();
+}
+
+class _ProductDetailScreenState extends State<ProductDetailScreen> {
+  Product get product => widget.product;
 
   @override
   Widget build(BuildContext context) {
@@ -34,9 +42,9 @@ class ProductDetailScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   _buildDivider(),
                   const SizedBox(height: 24),
-                  _buildUrlSection(context),
+                  _buildUrlSection(),
                   const SizedBox(height: 32),
-                  _buildCTAButton(context),
+                  _buildCTAButton(),
                   const SizedBox(height: 40),
                 ],
               ).animate().fadeIn(duration: 400.ms).slideY(
@@ -193,7 +201,7 @@ class ProductDetailScreen extends StatelessWidget {
     return Container(height: 1, color: AppTheme.border);
   }
 
-  Widget _buildUrlSection(BuildContext context) {
+  Widget _buildUrlSection() {
     if (!product.hasValidUrl) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,9 +217,11 @@ class ProductDetailScreen extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: () {
-            Clipboard.setData(ClipboardData(text: product.url));
-            ScaffoldMessenger.of(context).showSnackBar(
+          onTap: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            await Clipboard.setData(ClipboardData(text: product.url));
+            if (!context.mounted) return;
+            messenger.showSnackBar(
               const SnackBar(content: Text('Link copied to clipboard!')),
             );
           },
@@ -247,7 +257,7 @@ class ProductDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildCTAButton(BuildContext context) {
+  Widget _buildCTAButton() {
     return SizedBox(
       width: double.infinity,
       child: DecoratedBox(
@@ -269,19 +279,22 @@ class ProductDetailScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 18),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
-          icon: const Icon(Icons.open_in_new_rounded, color: Colors.white, size: 20),
-          label: Text(
-            'OPEN ON ${product.source.toUpperCase()}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-              letterSpacing: 0.8,
+          icon: const Icon(Icons.flash_on_rounded, color: AppTheme.background, size: 24),
+          label: const Text(
+            'BUY WITH 1-CLICK',
+            style: TextStyle(
+              color: AppTheme.background,
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
+              letterSpacing: 1.2,
             ),
           ),
-          onPressed: product.hasValidUrl
-              ? () => ApiService.launchProductUrl(product.url)
-              : null,
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const CheckoutSuccessScreen()),
+            );
+          },
         ),
       ),
     );
