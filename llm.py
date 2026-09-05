@@ -144,17 +144,22 @@ def _ask_nvidia(prompt: str) -> str:
     """Send prompt to the NVIDIA NIM chat-completions endpoint."""
     client = _get_nvidia_client()
 
-    response = client.chat.completions.create(
-        model=_NVIDIA_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=1,
-        top_p=0.95,
-        max_tokens=_NVIDIA_MAX_TOKENS,
-        extra_body={
+    kwargs = {
+        "model": _NVIDIA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 1,
+        "top_p": 0.95,
+        "max_tokens": _NVIDIA_MAX_TOKENS,
+    }
+
+    # Only include NVIDIA-specific kwargs if connecting to official NIM
+    if "nvidia.com" in _NVIDIA_BASE_URL:
+        kwargs["extra_body"] = {
             "chat_template_kwargs": {"enable_thinking": True},
             "reasoning_budget": _NVIDIA_MAX_TOKENS,
-        },
-    )
+        }
+
+    response = client.chat.completions.create(**kwargs)
 
     message = response.choices[0].message
     content = (message.content or "").strip()

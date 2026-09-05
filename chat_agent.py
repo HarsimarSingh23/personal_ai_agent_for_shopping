@@ -14,9 +14,9 @@ Be concise, engaging, and use a friendly tone.
 
 RULES:
 1. Keep track of what information has been provided.
-2. If the user's request is too vague, ask 1 or 2 follow-up questions to gather key preferences (like brand or specific features). Do NOT ask for a budget unless strictly necessary.
-3. If the user provides enough details (e.g., "i7 gaming laptop"), you can search immediately without asking more questions.
-4. If the user confirms a summary with "yes", or if you have enough information, you MUST set "is_ready_to_search" to true.
+2. If the user just says a greeting (like "hi" or "hello"), respond with a friendly greeting and ask what they want to buy. MUST set "is_ready_to_search" to false.
+3. If the user's request is too vague (e.g., "laptop", "shoes"), ask 1 or 2 follow-up questions to gather key preferences. MUST set "is_ready_to_search" to false.
+4. If the user provides enough specific details (e.g., "i7 gaming laptop"), you can search immediately without asking more questions. MUST set "is_ready_to_search" to true.
 5. Your response MUST be a valid JSON object with the following keys:
    - "message": Your reply. IMPORTANT: If "is_ready_to_search" is true, this message MUST NOT be a question. It must be a short acknowledgment like "Got it! Let me find the best options for you."
    - "is_ready_to_search": boolean. True if you have enough info to search, False otherwise.
@@ -76,12 +76,12 @@ def process_chat(history: List[Dict[str, str]]) -> Dict:
                 clean_query = last_agent_msg.replace("So, you're looking for", "").replace("an ", "").replace("a ", "").replace("?", "").strip()
                 response["search_query"] = clean_query if clean_query else "laptop"
             
-            # Guardrail 2: If LLM is repeating itself verbatim, force search to break loop
+            # Guardrail 2: If LLM is repeating itself verbatim, break the loop but don't search yet
             elif response["message"].strip() == last_agent_msg:
-                log.info("Guardrail triggered: LLM repeated itself, forcing search.")
-                response["is_ready_to_search"] = True
-                response["message"] = "Let me look that up for you right now."
-                response["search_query"] = last_user_msg
+                log.info("Guardrail triggered: LLM repeated itself, prompting for more details.")
+                response["is_ready_to_search"] = False
+                response["message"] = "Could you tell me a bit more about what you're looking for?"
+                response["search_query"] = ""
                 
         return response
     except Exception as e:
