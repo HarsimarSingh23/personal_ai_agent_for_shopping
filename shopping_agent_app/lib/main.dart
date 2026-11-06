@@ -1,23 +1,22 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'theme/app_theme.dart';
+
 import 'screens/agent_chat_screen.dart';
 import 'screens/history_screen.dart';
+import 'services/api_service.dart';
+import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-    systemNavigationBarColor: AppTheme.background,
-    systemNavigationBarIconBrightness: Brightness.dark,
+    statusBarIconBrightness: Brightness.light, // light icons on the dark UI
+    statusBarBrightness: Brightness.dark, // iOS
+    systemNavigationBarColor: AppTheme.surface,
+    systemNavigationBarIconBrightness: Brightness.light,
   ));
+  await ApiService.instance.init();
   runApp(const ShoppingAgentApp());
 }
 
@@ -29,147 +28,71 @@ class ShoppingAgentApp extends StatelessWidget {
     return MaterialApp(
       title: 'AI Shopper',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      home: const _RootNavigator(),
+      theme: AppTheme.dark,
+      darkTheme: AppTheme.dark,
+      themeMode: ThemeMode.dark,
+      // On tablets and the web, keep a comfortable reading width.
+      builder: (context, child) => ColoredBox(
+        color: AppTheme.background,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: child,
+          ),
+        ),
+      ),
+      home: const RootNavigator(),
     );
   }
 }
 
-class _RootNavigator extends StatefulWidget {
-  const _RootNavigator();
+class RootNavigator extends StatefulWidget {
+  const RootNavigator({super.key});
 
   @override
-  State<_RootNavigator> createState() => _RootNavigatorState();
+  State<RootNavigator> createState() => _RootNavigatorState();
 }
 
-class _RootNavigatorState extends State<_RootNavigator>
-    with SingleTickerProviderStateMixin {
+class _RootNavigatorState extends State<RootNavigator> {
   int _currentIndex = 0;
-
   final GlobalKey<HistoryScreenState> _historyKey = GlobalKey<HistoryScreenState>();
 
-  void _onTap(int index) {
+  void _onSelect(int index) {
     if (index == _currentIndex) return;
     HapticFeedback.selectionClick();
     setState(() => _currentIndex = index);
-
-    if (index == 1) {
-      _historyKey.currentState?.reloadIfNeeded();
-    }
+    if (index == 1) _historyKey.currentState?.reloadIfNeeded();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          const AgentChatScreen(key: ValueKey('home')),
+          const AgentChatScreen(),
           HistoryScreen(key: _historyKey),
         ],
       ),
-      bottomNavigationBar: _BottomNav(
-        currentIndex: _currentIndex,
-        onTap: _onTap,
-      ),
-    );
-  }
-}
-
-class _BottomNav extends StatelessWidget {
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-
-  const _BottomNav({required this.currentIndex, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        border: Border(top: BorderSide(color: AppTheme.border.withValues(alpha: 0.6), width: 1)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              _NavItem(
-                icon: Icons.search_rounded,
-                activeIcon: Icons.search_rounded,
-                label: 'Chat',
-                isActive: currentIndex == 0,
-                onTap: () => onTap(0),
-              ),
-              _NavItem(
-                icon: Icons.history_rounded,
-                activeIcon: Icons.history_rounded,
-                label: 'History',
-                isActive: currentIndex == 1,
-                onTap: () => onTap(1),
-              ),
-            ],
-          ),
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppTheme.border)),
         ),
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  final IconData icon;
-  final IconData activeIcon;
-  final String label;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _NavItem({
-    required this.icon,
-    required this.activeIcon,
-    required this.label,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: isActive ? AppTheme.primary.withValues(alpha: 0.1) : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: Icon(
-                  isActive ? activeIcon : icon,
-                  key: ValueKey(isActive),
-                  color: isActive ? AppTheme.primary : AppTheme.textMuted,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: GoogleFonts.inter(
-                  color: isActive ? AppTheme.primary : AppTheme.textMuted,
-                  fontSize: 11,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
+        child: NavigationBar(
+          selectedIndex: _currentIndex,
+          onDestinationSelected: _onSelect,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline_rounded),
+              selectedIcon: Icon(Icons.chat_bubble_rounded),
+              label: 'Assistant',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.history_rounded),
+              selectedIcon: Icon(Icons.history_rounded),
+              label: 'History',
+            ),
+          ],
         ),
       ),
     );

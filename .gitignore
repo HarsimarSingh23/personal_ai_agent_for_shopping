@@ -50,3 +50,9 @@ Desktop.ini
 # IDE
 .vscode/
 .idea/
+
+# Keep the env template
+!.env.example
+
+# Local databases
+*.db
