@@ -1,0 +1,4 @@
+# Optional: AgentMonitor observability dashboard (see monitoring.py).
+# Installed from GitHub; pin to a commit/tag for reproducible builds, e.g.
+#   agenticmonitor[tokens] @ git+https://github.com/HarsimarSingh23/AgentMonitor.git@<commit-sha>
+agenticmonitor[tokens] @ git+https://github.com/HarsimarSingh23/AgentMonitor.git

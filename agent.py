@@ -9,8 +9,6 @@ Run: python agent.py
 
 import logging
 import sys
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
@@ -23,14 +21,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 logging.getLogger("urllib3").setLevel(logging.WARNING)
-logging.getLogger("selenium").setLevel(logging.WARNING)
-logging.getLogger("undetected_chromedriver").setLevel(logging.WARNING)
 
-from scraper          import scrape             as scrape_amazon
-from flipkart_scraper import scrape_flipkart
-from ddg_scraper      import scrape_ddg
-from llm              import translate_query, recommend
-from storage          import save_session
+import pipeline
+from llm     import LLMConfigError
+from storage import init_db, save_session
 
 
 def _print_banner() -> None:
@@ -104,66 +98,35 @@ def _print_recommendation(rec: dict, query_original: str) -> None:
 
 
 def run_search(user_input: str) -> None:
-    print(f"\n🔍 Translating your request…")
+    print("\n🔍 Translating your request and searching Amazon, Flipkart and the web…")
     try:
-        english_query = translate_query(user_input)
-    except EnvironmentError as e:
+        out = pipeline.run_search(user_input)
+    except LLMConfigError as e:
         print(f"\n❌ {e}\n")
         return
 
-    print(f"   Search query: \"{english_query}\"\n")
+    print(f"   Search query: \"{out['query']}\"")
+    for site, state in out["source_status"].items():
+        print(f"   {'✓' if state == 'ok' else '⚠'} {site.capitalize()}: {len(out['results'][site])} results ({state})")
 
-    print("⏳ Searching Amazon, Flipkart, and the web (DuckDuckGo) in parallel…")
-    amazon_results:   list[dict] = []
-    flipkart_results: list[dict] = []
-    ddg_results:      list[dict] = []
-
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {
-            pool.submit(scrape_amazon,   english_query): "amazon",
-            pool.submit(scrape_flipkart, english_query): "flipkart",
-            pool.submit(scrape_ddg,      english_query): "web (DDG)",
-        }
-        for future in as_completed(futures):
-            site = futures[future]
-            try:
-                data = future.result()
-                if site == "amazon":
-                    amazon_results   = [dict(p, source="amazon")                  for p in data]
-                elif site == "flipkart":
-                    flipkart_results = [dict(p, source="flipkart")                for p in data]
-                else:
-                    ddg_results      = [dict(p, source=p.get("source", "web"))    for p in data]
-                print(f"   ✓ {site.capitalize()}: {len(data)} results found")
-            except Exception as e:
-                log.error("%s scrape failed: %s", site, e)
-
-    combined = amazon_results + flipkart_results + ddg_results
-
+    results = out["results"]
+    combined = results["amazon"] + results["flipkart"] + results["web"]
     if not combined:
         print("\n⚠  No products found on any site. Try a different query.\n")
         return
 
     print(f"\n📋 All results ({len(combined)} products across Amazon, Flipkart, and the web):")
     _print_results_table(combined)
-
-    print("🤖 Asking AI to pick the best option…\n")
-    try:
-        rec = recommend(english_query, combined)
-    except Exception as e:
-        log.error("Recommendation failed: %s", e)
-        rec = {"product": combined[0], "reason": "AI unavailable — showing first result."}
-
-    _print_recommendation(rec, user_input)
+    _print_recommendation(out["recommendation"] or {}, user_input)
 
     try:
         session_id = save_session(
             query_original   = user_input,
-            query_english    = english_query,
-            amazon_results   = amazon_results,
-            flipkart_results = flipkart_results,
-            ddg_results      = ddg_results,
-            recommendation   = rec,
+            query_english    = out["query"],
+            amazon_results   = results["amazon"],
+            flipkart_results = results["flipkart"],
+            ddg_results      = results["web"],
+            recommendation   = out["recommendation"],
         )
         print(f"💾 Session saved (ID: {session_id[:8]}…)\n")
     except Exception as e:
@@ -171,6 +134,7 @@ def run_search(user_input: str) -> None:
 
 
 def main() -> None:
+    init_db()
     _print_banner()
 
     while True:
