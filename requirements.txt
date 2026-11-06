@@ -1,27 +1,23 @@
+# AI Shopping Agent — runtime dependencies
+# Optional observability: requirements-monitoring.txt
+# Tests / tooling:        requirements-dev.txt
 
-# AI Shopping Agent - Dependencies
-# API backend
-# Browser automation (Amazon scraper)
-# Database
-# DuckDuckGo search (no API key required)
-# Environment & config
-# HTTP scraping (Flipkart scraper)
-# LLM providers (selected via LLM_PROVIDER env var)
-# aiosqlite>=0.20.0       # uncomment if you want async SQLite in dev
-# ──────────────────────────────────────────────
-beautifulsoup4>=4.12.0
-agenticmonitor[tokens] @ git+https://github.com/HarsimarSingh23/AgentMonitor.git   # observability (AgentMonitor)
-curl_cffi>=0.7.3
-ddgs>=9.14.0
-fastapi>=0.111.0
-google-genai>=2.7.0          # provider: gemini
-lxml>=4.9.0
-openai>=1.30.0               # provider: nvidia (OpenAI-compatible NIM API)
-psycopg2-binary>=2.9.9   # PostgreSQL driver (production)
-pydantic-settings>=2.0.0
+# API
+fastapi>=0.111.0,<1.0
+uvicorn[standard]>=0.30.0,<1.0
 python-dotenv>=1.0.0
-requests>=2.28.0
-setuptools>=70.0.0          # provides distutils for Python 3.12 (needed by undetected-chromedriver)
-sqlalchemy>=2.0.30
+
+# Database
+sqlalchemy>=2.0.30,<3.0
+psycopg2-binary>=2.9.9          # PostgreSQL driver (production)
+
+# Scraping
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+curl_cffi>=0.7.3                # browser-impersonating HTTP (Amazon, Flipkart)
+ddgs>=9.14.0                    # DuckDuckGo search (no API key)
+
+# LLM providers (selected with LLM_PROVIDER)
+openai>=1.30.0                  # nvidia: OpenAI-compatible NIM API
+google-genai>=1.0.0             # gemini
 tenacity>=8.4.0
-uvicorn[standard]>=0.30.0

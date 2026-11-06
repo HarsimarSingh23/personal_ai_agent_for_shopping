@@ -1,20 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+
 import '../models/search_response.dart';
 import '../theme/app_theme.dart';
-import '../services/api_service.dart';
-import '../screens/checkout_success_screen.dart';
+import 'product_bits.dart';
 
+/// The AI's top pick, shown at the top of the results screen.
 class RecommendationCard extends StatelessWidget {
   final Product product;
   final String reason;
+  final VoidCallback? onTap;
 
-  const RecommendationCard({
-    super.key,
-    required this.product,
-    required this.reason,
-  });
+  const RecommendationCard({super.key, required this.product, required this.reason, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -23,303 +20,144 @@ class RecommendationCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: AppTheme.recommendGradient,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.3),
-          width: 1.5,
-        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.35), width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.12),
-            blurRadius: 30,
-            spreadRadius: 2,
-            offset: const Offset(0, 8),
-          ),
-          BoxShadow(
-            color: AppTheme.accent.withValues(alpha: 0.08),
-            blurRadius: 50,
-            offset: const Offset(0, 16),
+            color: AppTheme.primary.withValues(alpha: 0.08),
+            blurRadius: 32,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 16),
-            // Only render the image AND its bottom gap when an image is available.
-            if (product.hasImage) ...[
-              _buildProductImage(),
-              const SizedBox(height: 16),
-            ],
-            _buildProductInfo(),
-            const SizedBox(height: 16),
-            _buildReasonBox(),
-            const SizedBox(height: 20),
-            _buildCTAButton(context),
-          ],
-        ),
-      ),
-    )
-        .animate()
-        .fadeIn(duration: 400.ms)
-        .slideY(begin: 0.08, duration: 400.ms, curve: Curves.easeOutCubic);
-  }
-
-  Widget _buildHeader() {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            gradient: AppTheme.primaryGradient,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.auto_awesome, color: Colors.white, size: 13),
-              SizedBox(width: 5),
-              Text(
-                'AI TOP PICK',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const AiPickChip(),
+                    const Spacer(),
+                    SourceBadge.of(product, large: true),
+                  ],
                 ),
-              ),
-            ],
-          ),
-        ),
-        const Spacer(),
-        _SourceBadge(source: product.source),
-      ],
-    );
-  }
-
-  Widget _buildProductImage() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: CachedNetworkImage(
-        imageUrl: product.image,
-        height: 180,
-        width: double.infinity,
-        fit: BoxFit.contain,
-        placeholder: (_, __) => Container(
-          height: 180,
-          color: AppTheme.surfaceElevated,
-          child: const Center(
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
-          ),
-        ),
-        errorWidget: (_, __, ___) => const SizedBox.shrink(),
-      ),
-    );
-  }
-
-  Widget _buildProductInfo() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          product.title,
-          style: const TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            height: 1.4,
-          ),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              product.price,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const Spacer(),
-            if (product.rating != 'N/A') ...[
-              const Icon(Icons.star_rounded, color: AppTheme.gold, size: 18),
-              const SizedBox(width: 4),
-              Text(
-                product.rating,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ProductImage(product: product, size: 104, radius: 16),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            product.title,
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              height: 1.35,
+                            ),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(product.displayPrice, style: AppTheme.display(24, weight: FontWeight.w800)),
+                          const SizedBox(height: 4),
+                          RatingLabel(product: product, size: 13),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              if (product.reviewsCount != 'N/A') ...[
-                const SizedBox(width: 4),
-                Text(
-                  '(${product.reviewsCount})',
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 12,
+                if (reason.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  ReasonBox(reason: reason),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: product.hasValidUrl ? () => openProduct(context, product) : null,
+                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                    label: Text('View deal on ${product.store}'),
                   ),
                 ),
               ],
-            ],
-          ],
+            ),
+          ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildReasonBox() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.25),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.border, width: 1),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.06, duration: 350.ms, curve: Curves.easeOutCubic);
+  }
+}
+
+class AiPickChip extends StatelessWidget {
+  const AiPickChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        gradient: AppTheme.brandGradient,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.lightbulb_outline_rounded,
-              color: AppTheme.gold, size: 16),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              reason,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-                height: 1.55,
-                fontStyle: FontStyle.italic,
-              ),
+          Icon(Icons.auto_awesome, color: AppTheme.onPrimary, size: 13),
+          SizedBox(width: 5),
+          Text(
+            'AI TOP PICK',
+            style: TextStyle(
+              color: AppTheme.onPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.1,
             ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildCTAButton(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.35),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                shadowColor: Colors.transparent,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: const Icon(Icons.open_in_new_rounded, size: 18, color: Colors.white),
-              label: const Text(
-                'VIEW DEAL',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                  letterSpacing: 1,
-                ),
-              ),
-              onPressed: product.hasValidUrl
-                  ? () async {
-                      final opened = await ApiService.launchProductUrl(product.url);
-                      if (!opened && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Could not open the product link.'),
-                          ),
-                        );
-                      }
-                    }
-                  : null,
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: AppTheme.gold,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.gold.withValues(alpha: 0.35),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.transparent,
-              shadowColor: Colors.transparent,
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-            onPressed: () {
-              // 1-Click buy goes to success screen
-              _navigateToCheckout(context);
-            },
-            child: const Icon(Icons.flash_on_rounded, size: 20, color: AppTheme.background),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // Helper method since we need the import
-  void _navigateToCheckout(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const CheckoutSuccessScreen()),
     );
   }
 }
 
-class _SourceBadge extends StatelessWidget {
-  final String source;
-  const _SourceBadge({required this.source});
+class ReasonBox extends StatelessWidget {
+  final String reason;
+  final int? maxLines;
+
+  const ReasonBox({super.key, required this.reason, this.maxLines});
 
   @override
   Widget build(BuildContext context) {
-    final color = AppTheme.sourceColor(source);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
+        color: Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(AppTheme.sourceIcon(source), color: color, size: 12),
-          const SizedBox(width: 5),
-          Text(
-            source.toUpperCase(),
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(Icons.lightbulb_outline_rounded, color: AppTheme.gold, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              reason,
+              maxLines: maxLines,
+              overflow: maxLines == null ? null : TextOverflow.ellipsis,
+              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.5),
             ),
           ),
         ],

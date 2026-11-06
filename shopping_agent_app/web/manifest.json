@@ -1,11 +1,11 @@
 {
-    "name": "shopping_agent_app",
-    "short_name": "shopping_agent_app",
+    "name": "AI Shopper",
+    "short_name": "AI Shopper",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0B0B0F",
+    "theme_color": "#0B0B0F",
+    "description": "Chat about what you need and compare the best deals across Amazon, Flipkart and more.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

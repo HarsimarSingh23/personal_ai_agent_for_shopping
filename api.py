@@ -1,103 +1,166 @@
 """
-api.py — Production-ready FastAPI backend for the AI Shopping Agent.
+api.py — FastAPI backend for the AI Shopping Agent.
 
-Features:
-  - /health endpoint for Docker health checks
-  - Request-ID tracing via X-Request-ID header
-  - Configurable CORS via ALLOWED_ORIGINS env var
-  - 60-second timeout on parallel scraping
-  - Structured JSON logging in production
-  - Full session CRUD endpoints
+    POST   /api/chat                  conversational onboarding
+    POST   /api/search                translate → scrape → recommend → save
+    GET    /api/sessions              this device's history (paginated)
+    GET    /api/sessions/last         most recent search
+    GET    /api/sessions/{id}         one search with full results
+    DELETE /api/sessions/{id}         delete one search
+    DELETE /api/sessions              clear this device's history
+    GET    /health                    liveness + DB/LLM status (503 if DB down)
+
+Production features: optional API-key auth (X-API-Key), per-IP rate limits,
+per-device history (X-Client-ID), request-ID tracing, JSON logs, security
+headers, and errors that never leak internals. Configuration: see config.py.
 """
 
-import contextvars
+import hmac
 import logging
-import os
+import re
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
+from contextlib import asynccontextmanager
+from typing import Literal
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-load_dotenv()
+from config import settings
+from middleware import RateLimiter, client_ip, configure_logging, request_id_var
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Logging
-# ──────────────────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  [%(levelname)s]  %(name)s — %(message)s",
-    datefmt="%H:%M:%S",
+configure_logging(settings.log_level, settings.log_format)
+log = logging.getLogger("api")
+
+import monitoring  # noqa: E402  (imported after logging is configured)
+import pipeline  # noqa: E402
+from chat_agent import process_chat  # noqa: E402
+from guardrails import mask_credit_card  # noqa: E402
+from llm import LLMConfigError, llm_status  # noqa: E402
+from storage import (  # noqa: E402
+    check_db_connection,
+    delete_session,
+    delete_sessions_for_client,
+    init_db,
+    load_last_session,
+    load_session_by_id,
+    load_sessions,
+    save_session,
 )
-log = logging.getLogger(__name__)
+
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+limiter = RateLimiter()
+
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Imports (after logging is configured)
+# Lifespan
 # ──────────────────────────────────────────────────────────────────────────────
-from scraper import scrape as scrape_amazon
-from flipkart_scraper import scrape_flipkart
-from ddg_scraper import scrape_ddg
-from llm import translate_query, recommend
-from storage import save_session, load_sessions, load_last_session, load_session_by_id, check_db_connection, init_db
-from chat_agent import process_chat
-from guardrails import mask_credit_card
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    monitoring.start_dashboard()
+    if settings.is_production and "*" in settings.allowed_origins:
+        log.warning("ALLOWED_ORIGINS is '*' in production — restrict it to your web app's origin.")
+    if settings.is_production and not settings.api_key:
+        log.warning("API_KEY is not set in production — the API is open to anyone who can reach it.")
+    if llm_status() != "configured":
+        log.warning("LLM provider not ready: %s", llm_status())
+    log.info("AI Shopping Agent API %s started (env=%s)", settings.app_version, settings.app_env)
+    yield
+    pipeline.shutdown()
 
-import monitoring
 
-# Wrap agent tools so AgentMonitor records every call — arguments, results,
-# latency, and errors. These are no-ops when monitoring is disabled.
-translate_query = monitoring.tool(translate_query, "translate_query")
-scrape_amazon   = monitoring.tool(scrape_amazon,   "scrape_amazon")
-scrape_flipkart = monitoring.tool(scrape_flipkart, "scrape_flipkart")
-scrape_ddg      = monitoring.tool(scrape_ddg,      "scrape_ddg")
-recommend       = monitoring.tool(recommend,       "recommend")
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Config
-# ──────────────────────────────────────────────────────────────────────────────
-_ALLOWED_ORIGINS = [
-    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")
-]
-_SCRAPE_TIMEOUT = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "60"))
-
-# ──────────────────────────────────────────────────────────────────────────────
-# FastAPI app
-# ──────────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="AI Shopping Agent API",
-    version="1.0.0",
+    version=settings.app_version,
     description="Personal AI Shopping Agent — searches Amazon, Flipkart, and the web.",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.enable_docs else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if settings.enable_docs else None,
 )
 
+_wildcard = "*" in settings.allowed_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"] if _wildcard else settings.allowed_origins,
+    allow_credentials=not _wildcard,  # credentials + "*" is rejected by browsers
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "X-API-Key", "X-Client-ID", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "X-Response-Time-Ms", "Retry-After"],
+    max_age=600,
 )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Request-ID middleware
-# ──────────────────────────────────────────────────────────────────────────────
 @app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+async def request_context(request: Request, call_next):
+    incoming = request.headers.get("X-Request-ID", "")
+    request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid.uuid4().hex
+    token = request_id_var.set(request_id)
     start = time.perf_counter()
-    response: Response = await call_next(request)
+    try:
+        response: Response = await call_next(request)
+    except Exception:
+        log.exception("Unhandled error on %s %s", request.method, request.url.path)
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Something went wrong on our side. Please try again.", "request_id": request_id},
+        )
+    finally:
+        request_id_var.reset(token)
+
     duration_ms = (time.perf_counter() - start) * 1000
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time-Ms"] = f"{duration_ms:.1f}"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
     log.info(
-        "%s %s → %d  (%.1fms)  [%s]",
-        request.method, request.url.path, response.status_code,
-        duration_ms, request_id[:8],
+        "%s %s → %d (%.0fms) [%s]",
+        request.method, request.url.path, response.status_code, duration_ms, request_id[:8],
     )
     return response
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    if settings.api_key and not hmac.compare_digest(x_api_key or "", settings.api_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+
+
+def get_client_id(x_client_id: str | None = Header(default=None)) -> str | None:
+    if x_client_id is None or x_client_id == "":
+        return None
+    if not _CLIENT_ID_RE.match(x_client_id):
+        raise HTTPException(status_code=400, detail="Invalid X-Client-ID header.")
+    return x_client_id
+
+
+def rate_limited(bucket: str, setting: str):
+    def _check(request: Request) -> None:
+        retry_after = limiter.hit(f"{bucket}:{client_ip(request)}", getattr(settings, setting))
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=429,
+                detail="You're going a bit fast. Please wait a moment and try again.",
+                headers={"Retry-After": str(int(retry_after) + 1)},
+            )
+    return Depends(_check)
+
+
+def _valid_session_id(session_id: str) -> str:
+    try:
+        return str(uuid.UUID(session_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -106,283 +169,186 @@ async def add_request_id(request: Request, call_next):
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=2, max_length=200)
 
+
 class ChatMessage(BaseModel):
-    role: str
-    content: str
+    role: Literal["user", "agent", "assistant"]
+    content: str = Field(..., min_length=1, max_length=4000)
+
 
 class ChatRequest(BaseModel):
-    history: list[ChatMessage] = Field(..., max_length=50)
+    history: list[ChatMessage] = Field(..., min_length=1, max_length=100)
+
+
+class ChatResponse(BaseModel):
+    message: str
+    is_ready_to_search: bool
+    search_query: str = ""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Endpoints
+# Ops
 # ──────────────────────────────────────────────────────────────────────────────
-@app.on_event("startup")
-def on_startup():
-    init_db()
-    monitoring.start_dashboard()
-    log.info("Pre-warming Chrome driver to prevent first-request timeout...")
-    try:
-        from scraper import _build_driver
-        driver = _build_driver()
-        driver.quit()
-        log.info("Chrome driver pre-warmed successfully.")
-    except Exception as e:
-        log.warning("Failed to pre-warm Chrome driver: %s", e)
-
-
 @app.get("/health", tags=["ops"])
-def health():
-    """Docker/k8s health probe — verifies API and DB are alive."""
+def health(response: Response):
+    """Docker/k8s probe. Returns 503 when the database is unreachable."""
     db_ok = check_db_connection()
-    status = "ok" if db_ok else "degraded"
+    if not db_ok:
+        response.status_code = 503
     return {
-        "status": status,
+        "status": "ok" if db_ok else "degraded",
         "db": "connected" if db_ok else "unreachable",
-        "version": "1.0.0",
+        "llm": llm_status(),
+        "version": settings.app_version,
     }
 
 
-@app.post("/api/chat", tags=["chat"])
+# ──────────────────────────────────────────────────────────────────────────────
+# API
+# ──────────────────────────────────────────────────────────────────────────────
+api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
+
+
+@api.post(
+    "/chat",
+    tags=["chat"],
+    response_model=ChatResponse,
+    dependencies=[rate_limited("chat", "rate_limit_chat_per_min")],
+)
 def chat(request: ChatRequest):
-    """
-    Conversational onboarding endpoint for the AI Shopping Agent.
-    Masks PII/Credit Cards before processing.
-    """
-    history_dict = []
-    for msg in request.history:
-        # 1. Guardrail: Mask Credit Card details in the message
-        safe_content = mask_credit_card(msg.content)
-        history_dict.append({"role": msg.role, "content": safe_content})
-        
+    """Conversational onboarding. Card numbers are masked before the LLM sees them."""
+    history = [
+        {
+            "role": "user" if m.role == "user" else "agent",
+            "content": mask_credit_card(m.content.strip())[: settings.max_message_chars],
+        }
+        for m in request.history[-settings.max_chat_messages:]
+    ]
     try:
-        response_data = process_chat(history_dict)
-        return response_data
-    except Exception as e:
-        log.exception("Chat processing failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        return process_chat(history)
+    except LLMConfigError:
+        log.error("Chat unavailable: LLM provider is not configured.")
+        raise HTTPException(status_code=503, detail="The AI assistant is not available right now.")
 
-@app.post("/api/search", tags=["search"])
-def search(request: SearchRequest):
-    """
-    Translate user query → parallel scrape Amazon + Flipkart + DDG
-    → LLM recommendation → save session → return results.
-    """
-    user_input = request.query.strip()
-    if not user_input:
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    search_start = time.perf_counter()
-    log.info("🔍 Search request: '%s'", user_input)
+@api.post(
+    "/search",
+    tags=["search"],
+    dependencies=[rate_limited("search", "rate_limit_search_per_min")],
+)
+def search(request: SearchRequest, client_id: str | None = Depends(get_client_id)):
+    """Translate → parallel scrape Amazon + Flipkart + web → LLM pick → save."""
+    user_input = mask_credit_card(request.query.strip())
+    if len(user_input) < 2:
+        raise HTTPException(status_code=422, detail="Please describe what you want to buy.")
 
-    # Open a monitored session so AgentMonitor records this whole run.
-    mon_ctx = monitoring.session(query=user_input)
-    mon = mon_ctx.__enter__()
-    try:
+    with monitoring.session(query=user_input) as mon:
         mon.log_user_message(user_input)
-
-        # 1. Translate query to English
         try:
-            t0 = time.perf_counter()
-            english_query = translate_query(user_input)
-            log.info(
-                "🌐 Translated query: '%s' → '%s'  (%.0fms)",
-                user_input, english_query, (time.perf_counter() - t0) * 1000,
-            )
-            log.info("🌐 Translated query: '%s' → '%s'", user_input, english_query)
-        except EnvironmentError as e:
-            log.error("✗ Translation failed (config): %s", e)
-            raise HTTPException(status_code=503, detail=str(e))
-        except HTTPException:
-            raise
-        except Exception as e:
-            log.exception("✗ Translation failed: %s", e)
-            raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
+            out = pipeline.run_search(user_input, mon)
+        except LLMConfigError:
+            log.error("Search unavailable: LLM provider is not configured.")
+            raise HTTPException(status_code=503, detail="The AI assistant is not available right now.")
 
-        # 2. Parallel scrape with timeout
-        amazon_results:   list[dict] = []
-        flipkart_results: list[dict] = []
-        ddg_results:      list[dict] = []
+        results, rec = out["results"], out["recommendation"]
+        base = {
+            "query": out["query"],
+            "results": results,
+            "source_status": out["source_status"],
+            "recommendation": rec,
+        }
 
-        log.info("🛒 Scraping Amazon + Flipkart + Web for '%s' …", english_query)
-        scrape_start = time.perf_counter()
-        with mon.turn("scrape"), ThreadPoolExecutor(max_workers=3) as pool:
-            # Copy the current context per thread so scraper tool-calls are
-            # recorded under this session/turn (contextvars don't cross threads).
-            futures_map = {}
-            for _fn, _site in (
-                (scrape_amazon,   "amazon"),
-                (scrape_flipkart, "flipkart"),
-                (scrape_ddg,      "web"),
-            ):
-                _ctx = contextvars.copy_context()
-                futures_map[pool.submit(_ctx.run, _fn, english_query)] = _site
+        if out["total"] == 0:
+            mon.log_response("No products found.", query=out["query"], products=0)
+            return {**base, "session_id": None, "message": "No products found. Try different keywords."}
 
-            done, not_done = wait(futures_map.keys(), timeout=_SCRAPE_TIMEOUT, return_when=ALL_COMPLETED)
-
-            for future in done:
-                site = futures_map[future]
-                try:
-                    data = future.result()
-                    if site == "amazon":
-                        amazon_results   = [dict(p, source="amazon")             for p in data]
-                    elif site == "flipkart":
-                        flipkart_results = [dict(p, source="flipkart")           for p in data]
-                    else:
-                        ddg_results      = [dict(p, source=p.get("source", "web")) for p in data]
-                    log.info("  ✓ %-8s → %d results", site, len(data))
-                except Exception as e:
-                    log.exception("  ✗ %-8s scrape failed: %s", site, e)
-
-            for future in not_done:
-                site = futures_map[future]
-                log.warning("  ⚠ %-8s scraper timed out after %ds", site, _SCRAPE_TIMEOUT)
-
-        combined = amazon_results + flipkart_results + ddg_results
-        
-        # Filter out accessories if the query doesn't ask for them
-        accessory_keywords = ["bag", "case", "cover", "sleeve", "backpack", "charger", "adapter", "stand", "skin", "cable"]
-        q_lower = english_query.lower()
-        wants_accessory = any(k in q_lower for k in accessory_keywords)
-        
-        if not wants_accessory:
-            filtered_combined = []
-            for p in combined:
-                title_lower = p.get("title", "").lower()
-                is_accessory = any(k in title_lower for k in accessory_keywords)
-                if not is_accessory:
-                    filtered_combined.append(p)
-            
-            # Reassign only if filtering didn't remove everything (safety fallback)
-            if len(filtered_combined) > 0:
-                combined = filtered_combined
-                # Rebuild source lists if needed, though they aren't strictly used after this except for logging/saving
-                amazon_results = [p for p in amazon_results if not any(k in p.get("title", "").lower() for k in accessory_keywords)]
-                flipkart_results = [p for p in flipkart_results if not any(k in p.get("title", "").lower() for k in accessory_keywords)]
-                ddg_results = [p for p in ddg_results if not any(k in p.get("title", "").lower() for k in accessory_keywords)]
-
-        log.info(
-            "📦 Scrape complete for '%s': amazon=%d flipkart=%d web=%d (total=%d)  (%.0fms)",
-            english_query, len(amazon_results), len(flipkart_results),
-            len(ddg_results), len(combined), (time.perf_counter() - scrape_start) * 1000,
-        )
-
-        if not combined:
-            log.warning("🚫 No products found for '%s' — returning empty result", english_query)
-            mon.log_response("No products found.", query=english_query, products=0)
-            return {
-                "session_id":     None,
-                "query":          english_query,
-                "results":        {"amazon": [], "flipkart": [], "web": []},
-                "recommendation": None,
-                "message":        "No products found. Try a different query.",
-            }
-
-        # 3. LLM recommendation
-        try:
-            t0 = time.perf_counter()
-            rec = recommend(english_query, combined)
-            _rp = (rec or {}).get("product") or {}
-            log.info(
-                "🤖 Recommendation: [%s] %s — %s  (%.0fms)",
-                _rp.get("source", "?"),
-                (_rp.get("title") or "N/A")[:80],
-                (rec or {}).get("reason", "")[:120],
-                (time.perf_counter() - t0) * 1000,
-            )
-        except Exception as e:
-            log.exception("✗ Recommendation failed for '%s': %s", english_query, e)
-            rec = {"product": combined[0], "reason": "AI unavailable — showing first result."}
-
-        # 4. Persist session
         session_id = None
         try:
             session_id = save_session(
                 query_original=user_input,
-                query_english=english_query,
-                amazon_results=amazon_results,
-                flipkart_results=flipkart_results,
-                ddg_results=ddg_results,
+                query_english=out["query"],
+                amazon_results=results["amazon"],
+                flipkart_results=results["flipkart"],
+                ddg_results=results["web"],
                 recommendation=rec,
+                client_id=client_id,
             )
-            log.info("💾 Saved session %s", session_id)
-        except Exception as e:
-            log.exception("✗ Failed to save session for '%s': %s", english_query, e)
+        except Exception as e:  # the user still gets results if the DB hiccups
+            log.exception("Failed to save session: %s", e)
 
-        _rp = (rec or {}).get("product") or {}
+        pick = (rec or {}).get("product") or {}
         mon.log_response(
-            f"Recommended [{_rp.get('source', '?')}] "
-            f"{(_rp.get('title') or 'N/A')[:80]} — {(rec or {}).get('reason', '')[:200]}",
-            query=english_query, products=len(combined), session_id=session_id,
+            f"Recommended [{pick.get('source', '?')}] {(pick.get('title') or 'N/A')[:80]}",
+            query=out["query"], products=out["total"], session_id=session_id,
         )
-        log.info(
-            "✅ Search done: '%s' → %d products, session=%s  (total %.0fms)",
-            english_query, len(combined), session_id,
-            (time.perf_counter() - search_start) * 1000,
-        )
-        return {
-            "session_id": session_id,
-            "query":      english_query,
-            "results": {
-                "amazon":   amazon_results,
-                "flipkart": flipkart_results,
-                "web":      ddg_results,
-            },
-            "recommendation": rec,
-        }
-    finally:
-        mon_ctx.__exit__(None, None, None)
+        return {**base, "session_id": session_id}
 
 
-@app.get("/api/sessions", tags=["sessions"])
-def get_sessions():
-    """Return all saved search sessions, newest first."""
-    try:
-        return load_sessions()
-    except Exception as e:
-        log.error("Failed to load sessions: %s", e)
-        raise HTTPException(status_code=500, detail="Could not load sessions")
+@api.get(
+    "/sessions",
+    tags=["sessions"],
+    dependencies=[rate_limited("read", "rate_limit_read_per_min")],
+)
+def get_sessions(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    summary: bool = Query(False, description="Omit full product lists (much smaller payload)."),
+    client_id: str | None = Depends(get_client_id),
+):
+    """This device's saved searches, newest first."""
+    return load_sessions(limit=limit, offset=offset, client_id=client_id, summary=summary)
 
 
-@app.get("/api/sessions/last", tags=["sessions"])
-def get_last_session():
-    """Return the most recent search session."""
-    try:
-        session = load_last_session()
-        if not session:
-            raise HTTPException(status_code=404, detail="No sessions found")
-        return session
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error("Failed to load last session: %s", e)
-        raise HTTPException(status_code=500, detail="Could not load session")
+@api.get(
+    "/sessions/last",
+    tags=["sessions"],
+    dependencies=[rate_limited("read", "rate_limit_read_per_min")],
+)
+def get_last_session(client_id: str | None = Depends(get_client_id)):
+    session = load_last_session(client_id=client_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No sessions found.")
+    return session
 
 
-@app.get("/api/sessions/{session_id}", tags=["sessions"])
-def get_session(session_id: str):
-    """Return a specific session by ID."""
-    try:
-        session = load_session_by_id(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
-        return session
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error("Failed to load session %s: %s", session_id, e)
-        raise HTTPException(status_code=500, detail="Could not load session")
+@api.get(
+    "/sessions/{session_id}",
+    tags=["sessions"],
+    dependencies=[rate_limited("read", "rate_limit_read_per_min")],
+)
+def get_session(session_id: str, client_id: str | None = Depends(get_client_id)):
+    session = load_session_by_id(_valid_session_id(session_id), client_id=client_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return session
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Dev entry point
-# ──────────────────────────────────────────────────────────────────────────────
+@api.delete(
+    "/sessions/{session_id}",
+    tags=["sessions"],
+    status_code=204,
+    dependencies=[rate_limited("read", "rate_limit_read_per_min")],
+)
+def remove_session(session_id: str, client_id: str | None = Depends(get_client_id)):
+    if not delete_session(_valid_session_id(session_id), client_id=client_id):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return Response(status_code=204)
+
+
+@api.delete(
+    "/sessions",
+    tags=["sessions"],
+    dependencies=[rate_limited("read", "rate_limit_read_per_min")],
+)
+def clear_sessions(client_id: str | None = Depends(get_client_id)):
+    if not client_id:
+        raise HTTPException(status_code=400, detail="X-Client-ID header is required.")
+    return {"deleted": delete_sessions_for_client(client_id)}
+
+
+app.include_router(api)
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info",
-    )
+
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=not settings.is_production)
