@@ -1,7 +1,7 @@
 name: shopping_agent_app
-description: "Personal AI Shopping Agent — Find the best deals across Amazon, Flipkart & the web"
+description: "AI Shopper — chat about what you need and compare the best deals across Amazon, Flipkart & the web."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.8.1
@@ -15,22 +15,22 @@ dependencies:
   # Networking
   http: ^1.6.0
 
-  # Open product URLs in browser
+  # Open product URLs in the store app / browser
   url_launcher: ^6.3.0
+
+  # Anonymous per-install ID for private search history
+  shared_preferences: ^2.3.0
 
   # Product image caching
   cached_network_image: ^3.4.1
 
-  # Shimmer loading skeletons
-  shimmer: ^3.0.0
-
-  # Premium typography
+  # Typography
   google_fonts: ^6.2.1
 
   # Micro-animations
   flutter_animate: ^4.5.0
 
-  # Date formatting in history screen
+  # Number & date formatting
   intl: ^0.20.1
 
 dev_dependencies:

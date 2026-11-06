@@ -1,0 +1,24 @@
+# Never bake secrets or local state into the image
+.env
+.env.*
+!.env.example
+results/
+*.db
+
+# Tooling / VCS
+.git
+.github
+.idea
+.vscode
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+
+# Not part of the API image
+shopping_agent_app/
+tests/
+*.png
+*.md
+docker-compose*.yml

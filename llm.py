@@ -16,7 +16,13 @@ import json
 import logging
 import threading
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 load_dotenv()
 
@@ -39,9 +45,26 @@ _GEMINI_MODEL_PRIORITY = [
 _NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 _NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct")
 _NVIDIA_MAX_TOKENS = int(os.getenv("NVIDIA_MAX_TOKENS", "16384"))
+_NVIDIA_TEMPERATURE = float(os.getenv("NVIDIA_TEMPERATURE", "1"))
+_NVIDIA_THINKING = os.getenv("NVIDIA_ENABLE_THINKING", "1").strip().lower() in {"1", "true", "yes", "on"}
+_LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+
+class LLMConfigError(EnvironmentError):
+    """The selected LLM provider is not configured (e.g. missing API key)."""
+
 
 _client = None
 _client_lock = threading.Lock()
+
+_PLACEHOLDER_KEYS = {"", "your_gemini_api_key_here", "your_nvidia_api_key_here"}
+
+
+def llm_status() -> str:
+    """'configured' when the selected provider has an API key, else a reason."""
+    if _PROVIDER not in {"nvidia", "gemini"}:
+        return f"unknown provider '{_PROVIDER}'"
+    key = os.getenv("GEMINI_API_KEY" if _PROVIDER == "gemini" else "NVIDIA_API_KEY", "").strip()
+    return "configured" if key not in _PLACEHOLDER_KEYS else "missing api key"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -58,7 +81,7 @@ def _get_gemini_client():
 
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key or api_key == "your_gemini_api_key_here":
-            raise EnvironmentError(
+            raise LLMConfigError(
                 "GEMINI_API_KEY is not set.\n"
                 "1. Go to https://aistudio.google.com/app/apikey  (free)\n"
                 "2. Copy .env.example → .env\n"
@@ -119,7 +142,7 @@ def _get_nvidia_client():
 
         api_key = os.getenv("NVIDIA_API_KEY")
         if not api_key or api_key == "your_nvidia_api_key_here":
-            raise EnvironmentError(
+            raise LLMConfigError(
                 "NVIDIA_API_KEY is not set.\n"
                 "1. Go to https://build.nvidia.com/  and create an API key\n"
                 "2. Add NVIDIA_API_KEY=... to your .env"
@@ -131,7 +154,8 @@ def _get_nvidia_client():
             _client = OpenAI(
                 base_url=_NVIDIA_BASE_URL,
                 api_key=api_key,
-                timeout=15.0
+                timeout=_LLM_TIMEOUT,
+                max_retries=0,  # tenacity handles retries at the call site
             )
             log.info("NVIDIA client ready (model: %s)", _NVIDIA_MODEL)
         except ImportError:
@@ -147,13 +171,13 @@ def _ask_nvidia(prompt: str) -> str:
     kwargs = {
         "model": _NVIDIA_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 1,
+        "temperature": _NVIDIA_TEMPERATURE,
         "top_p": 0.95,
         "max_tokens": _NVIDIA_MAX_TOKENS,
     }
 
     # Only include NVIDIA-specific kwargs if connecting to official NIM
-    if "nvidia.com" in _NVIDIA_BASE_URL:
+    if _NVIDIA_THINKING and "nvidia.com" in _NVIDIA_BASE_URL:
         kwargs["extra_body"] = {
             "chat_template_kwargs": {"enable_thinking": True},
             "reasoning_budget": _NVIDIA_MAX_TOKENS,
@@ -184,10 +208,15 @@ def _ask(prompt: str) -> str:
     )
 
 
+_RETRYABLE = retry_if_exception_type(Exception) & retry_if_not_exception_type(
+    (LLMConfigError, ImportError, ValueError)
+)
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(Exception),
+    retry=_RETRYABLE,
     reraise=True
 )
 def translate_query(raw_input: str) -> str:
@@ -219,7 +248,7 @@ English search query:"""
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(Exception),
+    retry=_RETRYABLE,
     reraise=True
 )
 def recommend(original_query: str, products: list[dict]) -> dict:
@@ -277,13 +306,15 @@ Reply with ONLY the JSON object, no markdown, no extra text.
         log.warning("Could not parse LLM recommendation JSON: %s | Raw: %s", e, raw)
 
     def _parse_rating(p):
+        if p.get("rating_value") is not None:
+            return float(p["rating_value"])
         try:
-            return float(p.get("rating", "0").split()[0])
-        except (ValueError, AttributeError):
+            return float(str(p.get("rating", "0")).split()[0])
+        except (ValueError, AttributeError, IndexError):
             return 0.0
 
     best = max(products, key=_parse_rating)
     return {
         "product": best,
-        "reason":  "Recommended based on highest rating (LLM parse failed).",
+        "reason":  "This is the highest-rated option we found.",
     }
