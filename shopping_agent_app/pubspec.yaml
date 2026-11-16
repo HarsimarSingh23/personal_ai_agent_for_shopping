@@ -24,12 +24,6 @@ dependencies:
   # Product image caching
   cached_network_image: ^3.4.1
 
-  # Typography
-  google_fonts: ^6.2.1
-
-  # Micro-animations
-  flutter_animate: ^4.5.0
-
   # Number & date formatting
   intl: ^0.20.1
 

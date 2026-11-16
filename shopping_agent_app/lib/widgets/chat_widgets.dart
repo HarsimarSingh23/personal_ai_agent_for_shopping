@@ -3,34 +3,18 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 import '../models/search_response.dart';
 import '../theme/app_theme.dart';
 import 'product_bits.dart';
 import 'recommendation_card.dart';
 
-/// Gradient "spark" mark used for the assistant.
-class AgentAvatar extends StatelessWidget {
-  final double size;
-
-  const AgentAvatar({super.key, this.size = 30});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: const BoxDecoration(gradient: AppTheme.brandGradient, shape: BoxShape.circle),
-      child: Icon(Icons.auto_awesome, size: size * 0.52, color: AppTheme.onPrimary),
-    );
-  }
-}
-
-/// Lays out an agent row (avatar + content) or a right-aligned user row.
+/// Lays out an assistant row (left) or a user row (right).
 class ChatRow extends StatelessWidget {
   final bool isUser;
   final Widget child;
+
+  /// Kept for older call sites; the plain design shows no avatar.
   final bool showAvatar;
 
   /// Rich cards (results, progress) use the full row width.
@@ -41,19 +25,14 @@ class ChatRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          final maxWidth = wide ? width : width * (isUser ? 0.8 : 0.85);
+          final maxWidth = wide ? width : width * 0.82;
           return Row(
             mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (!isUser) ...[
-                showAvatar ? const AgentAvatar() : const SizedBox(width: 30),
-                const SizedBox(width: 8),
-              ],
               Flexible(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: child)),
             ],
           );
@@ -78,28 +57,21 @@ class MessageBubble extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Message copied')));
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: isUser ? AppTheme.primary : AppTheme.surfaceCard,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(20),
-            topRight: const Radius.circular(20),
-            bottomLeft: Radius.circular(isUser ? 20 : 6),
-            bottomRight: Radius.circular(isUser ? 6 : 20),
-          ),
-          border: isUser ? null : Border.all(color: AppTheme.border),
+          color: isUser ? AppTheme.primary : AppTheme.surfaceElevated,
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
           text,
           style: TextStyle(
             color: isUser ? AppTheme.onPrimary : AppTheme.textPrimary,
             fontSize: 15,
-            height: 1.42,
-            fontWeight: isUser ? FontWeight.w600 : FontWeight.w400,
+            height: 1.4,
           ),
         ),
       ),
-    ).animate().fadeIn(duration: 220.ms).slideY(begin: 0.15, duration: 220.ms, curve: Curves.easeOutCubic);
+    );
   }
 }
 
@@ -114,9 +86,9 @@ class ErrorBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
       decoration: BoxDecoration(
-        color: AppTheme.error.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.error.withValues(alpha: 0.35)),
+        color: const Color(0xFFFDF0F0),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: const Color(0xFFF2C4C4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -134,19 +106,15 @@ class ErrorBubble extends StatelessWidget {
           if (onRetry != null)
             Align(
               alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Try again'),
-              ),
+              child: TextButton(onPressed: onRetry, child: const Text('Try again')),
             ),
         ],
       ),
-    ).animate().fadeIn(duration: 220.ms).shakeX(hz: 3, amount: 2, duration: 300.ms);
+    );
   }
 }
 
-/// Three bouncing dots.
+/// Three dots that fade in turn while the assistant is replying.
 class TypingIndicator extends StatefulWidget {
   const TypingIndicator({super.key});
 
@@ -156,7 +124,7 @@ class TypingIndicator extends StatefulWidget {
 
 class _TypingIndicatorState extends State<TypingIndicator> with SingleTickerProviderStateMixin {
   late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat();
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
 
   @override
   void dispose() {
@@ -171,33 +139,24 @@ class _TypingIndicatorState extends State<TypingIndicator> with SingleTickerProv
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: AppTheme.surfaceCard,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-            bottomRight: Radius.circular(20),
-            bottomLeft: Radius.circular(6),
-          ),
-          border: Border.all(color: AppTheme.border),
+          color: AppTheme.surfaceElevated,
+          borderRadius: BorderRadius.circular(16),
         ),
         child: AnimatedBuilder(
           animation: _c,
           builder: (context, _) => Row(
             mainAxisSize: MainAxisSize.min,
             children: List.generate(3, (i) {
-              final t = (_c.value - i * 0.18) % 1.0;
-              final lift = math.sin(t * math.pi).clamp(0.0, 1.0);
+              final t = (_c.value - i * 0.2) % 1.0;
+              final strength = math.sin(t * math.pi).clamp(0.0, 1.0);
               return Padding(
                 padding: EdgeInsets.only(right: i < 2 ? 5 : 0),
-                child: Transform.translate(
-                  offset: Offset(0, -4 * lift),
-                  child: Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      color: Color.lerp(AppTheme.textMuted, AppTheme.primary, lift),
-                      shape: BoxShape.circle,
-                    ),
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textMuted.withValues(alpha: 0.35 + 0.65 * strength),
+                    shape: BoxShape.circle,
                   ),
                 ),
               );
@@ -209,7 +168,7 @@ class _TypingIndicatorState extends State<TypingIndicator> with SingleTickerProv
   }
 }
 
-/// Shows the agent's progress while a search runs (usually 15–40 s).
+/// Shown while a search runs (usually 10–30 s).
 class SearchProgressCard extends StatefulWidget {
   final String query;
 
@@ -220,13 +179,6 @@ class SearchProgressCard extends StatefulWidget {
 }
 
 class _SearchProgressCardState extends State<SearchProgressCard> {
-  static const _steps = [
-    (Icons.translate_rounded, 'Understanding your request', 0),
-    (Icons.travel_explore_rounded, 'Searching Amazon, Flipkart & more stores', 3),
-    (Icons.compare_arrows_rounded, 'Comparing prices, ratings & reviews', 12),
-    (Icons.auto_awesome, 'Picking the best deal for you', 20),
-  ];
-
   late final Timer _timer;
   int _elapsed = 0;
 
@@ -242,94 +194,35 @@ class _SearchProgressCardState extends State<SearchProgressCard> {
     super.dispose();
   }
 
-  int get _active {
-    var index = 0;
-    for (var i = 0; i < _steps.length; i++) {
-      if (_elapsed >= _steps[i].$3) index = i;
-    }
-    return index;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final active = _active;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.surfaceCard,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.25)),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Searching for', style: AppTheme.overline),
+          const Text(
+            'Searching Amazon, Flipkart & more stores',
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w500),
+          ),
           const SizedBox(height: 4),
           Text(
             widget.query,
-            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w700),
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 14),
-          for (var i = 0; i < _steps.length; i++)
-            _StepRow(
-              icon: _steps[i].$1,
-              label: _steps[i].$2,
-              state: i < active ? _StepState.done : (i == active ? _StepState.active : _StepState.pending),
-            ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: const LinearProgressIndicator(minHeight: 3, backgroundColor: AppTheme.surfaceElevated),
-          ),
+          const SizedBox(height: 12),
+          const LinearProgressIndicator(minHeight: 3, backgroundColor: AppTheme.surfaceElevated),
           const SizedBox(height: 8),
           Text(
-            _elapsed < 30 ? 'This usually takes 15–30 seconds' : 'Some stores are slow today — almost there…',
+            _elapsed < 30 ? 'This usually takes 10–30 seconds' : 'Some stores are slow, almost done…',
             style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
-          ),
-        ],
-      ),
-    ).animate().fadeIn(duration: 300.ms);
-  }
-}
-
-enum _StepState { done, active, pending }
-
-class _StepRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final _StepState state;
-
-  const _StepRow({required this.icon, required this.label, required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    final Widget leading = switch (state) {
-      _StepState.done => const Icon(Icons.check_circle_rounded, size: 18, color: AppTheme.success),
-      _StepState.active => const SizedBox(
-          width: 18,
-          height: 18,
-          child: Padding(padding: EdgeInsets.all(2), child: CircularProgressIndicator(strokeWidth: 2)),
-        ),
-      _StepState.pending => Icon(icon, size: 18, color: AppTheme.textMuted.withValues(alpha: 0.6)),
-    };
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          leading,
-          const SizedBox(width: 10),
-          Expanded(
-            child: AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 250),
-              style: TextStyle(
-                fontSize: 13.5,
-                color: state == _StepState.pending ? AppTheme.textMuted : AppTheme.textPrimary,
-                fontWeight: state == _StepState.active ? FontWeight.w600 : FontWeight.w400,
-              ),
-              child: Text(label),
-            ),
           ),
         ],
       ),
@@ -337,7 +230,7 @@ class _StepRow extends StatelessWidget {
   }
 }
 
-/// Compact results summary inside the conversation.
+/// Short results summary inside the conversation.
 class ResultsMessageCard extends StatelessWidget {
   final SearchResponse response;
   final VoidCallback onViewAll;
@@ -356,9 +249,9 @@ class ResultsMessageCard extends StatelessWidget {
     final missing = response.unavailableSources;
     return Container(
       decoration: BoxDecoration(
-        gradient: AppTheme.recommendGradient,
+        color: AppTheme.surfaceCard,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.35)),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Material(
         type: MaterialType.transparency,
@@ -372,20 +265,20 @@ class ResultsMessageCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const AiPickChip(),
+                    if (pick != null) const AiPickChip(),
                     const Spacer(),
                     Text(
-                      '${response.totalCount} found',
-                      style: const TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+                      '${response.totalCount} products found',
+                      style: const TextStyle(color: AppTheme.textMuted, fontSize: 12.5),
                     ),
                   ],
                 ),
                 if (pick != null) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ProductImage(product: pick, size: 72),
+                      ProductImage(product: pick, size: 68),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -397,50 +290,40 @@ class ResultsMessageCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: AppTheme.textPrimary,
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
                                 height: 1.35,
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 4),
+                            Text(
+                              pick.displayPrice,
+                              style: AppTheme.display(17, weight: FontWeight.w700),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
                             Row(
                               children: [
-                                Flexible(
-                                  child: Text(
-                                    pick.displayPrice,
-                                    style: AppTheme.display(18, weight: FontWeight.w800),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
                                 SourceBadge.of(pick),
+                                const SizedBox(width: 10),
+                                Flexible(child: RatingLabel(product: pick)),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            RatingLabel(product: pick),
                           ],
                         ),
                       ),
                     ],
                   ),
                   if (response.recommendationReason.isNotEmpty) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     ReasonBox(reason: response.recommendationReason, maxLines: 4),
                   ],
                 ],
                 if (missing.isNotEmpty) ...[
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      const Icon(Icons.info_outline_rounded, size: 14, color: AppTheme.warning),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          "${missing.join(' and ')} didn't respond, so results may be incomplete.",
-                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                        ),
-                      ),
-                    ],
+                  Text(
+                    "${missing.join(' and ')} didn't respond, so results may be incomplete.",
+                    style: const TextStyle(color: AppTheme.warning, fontSize: 12.5),
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -470,6 +353,6 @@ class ResultsMessageCard extends StatelessWidget {
           ),
         ),
       ),
-    ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.08, duration: 350.ms, curve: Curves.easeOutCubic);
+    );
   }
 }

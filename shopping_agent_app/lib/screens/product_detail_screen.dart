@@ -1,7 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 import '../models/search_response.dart';
 import '../theme/app_theme.dart';
@@ -53,33 +52,33 @@ class ProductDetailScreen extends StatelessWidget {
                   Row(
                     children: [
                       SourceBadge.of(product, large: true),
-                      if (isPick) ...[const SizedBox(width: 8), const AiPickChip()],
+                      if (isPick) ...[const SizedBox(width: 12), const AiPickChip()],
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   SelectableText(
                     product.title,
                     style: const TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: 19,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
                       height: 1.4,
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: Text(product.displayPrice, style: AppTheme.display(32, weight: FontWeight.w800)),
+                        child: Text(product.displayPrice, style: AppTheme.display(26, weight: FontWeight.w700)),
                       ),
                       if (product.hasRating) RatingLabel(product: product, size: 15),
                     ],
                   ),
                   if (isPick) ...[
-                    const SizedBox(height: 22),
-                    Text('WHY THE AI PICKED THIS', style: AppTheme.overline),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 20),
+                    const Text('Why this was suggested', style: AppTheme.overline),
+                    const SizedBox(height: 6),
                     ReasonBox(reason: aiReason!),
                   ],
                   const SizedBox(height: 22),
@@ -87,8 +86,7 @@ class ProductDetailScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   const _InfoRow(
                     icon: Icons.verified_user_outlined,
-                    text: "You'll complete your purchase securely on the store's own site. "
-                        'AI Shopper never handles payments.',
+                    text: "You buy the product on the store's own website. This app never handles payments.",
                   ),
                   const SizedBox(height: 12),
                   const _InfoRow(
@@ -96,7 +94,7 @@ class ProductDetailScreen extends StatelessWidget {
                     text: 'Prices and stock change often. Check the final price on the store before buying.',
                   ),
                 ],
-              ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.04, duration: 350.ms, curve: Curves.easeOutCubic),
+              ),
             ),
           ),
         ],
@@ -113,7 +111,7 @@ class ProductDetailScreen extends StatelessWidget {
         child: Icon(
           AppTheme.sourceIcon(product.source),
           size: 72,
-          color: AppTheme.sourceColor(product.source).withValues(alpha: 0.35),
+          color: AppTheme.textMuted,
         ),
       );
     }
@@ -128,7 +126,7 @@ class ProductDetailScreen extends StatelessWidget {
           errorWidget: (_, _, _) => Icon(
             AppTheme.sourceIcon(product.source),
             size: 72,
-            color: AppTheme.sourceColor(product.source).withValues(alpha: 0.35),
+            color: AppTheme.textMuted,
           ),
         ),
       ),
@@ -150,7 +148,7 @@ class ProductDetailScreen extends StatelessWidget {
               tooltip: 'Copy link',
               onPressed: () => _copyLink(context),
               style: IconButton.styleFrom(
-                fixedSize: const Size(52, 52),
+                fixedSize: const Size(48, 48),
                 side: const BorderSide(color: AppTheme.borderBright),
               ),
               icon: const Icon(Icons.link_rounded),
@@ -158,11 +156,10 @@ class ProductDetailScreen extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: SizedBox(
-                height: 52,
-                child: FilledButton.icon(
+                height: 48,
+                child: FilledButton(
                   onPressed: () => openProduct(context, product),
-                  icon: const Icon(Icons.shopping_cart_checkout_rounded),
-                  label: Text('Buy on ${product.store}'),
+                  child: Text('Buy on ${product.store}'),
                 ),
               ),
             ),

@@ -1,109 +1,70 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
+/// A plain, light theme: white surfaces, grey borders and one blue accent.
+/// Uses the phone's own font (Roboto on Android, San Francisco on iPhone).
 class AppTheme {
   AppTheme._();
 
   // ── Palette ──────────────────────────────────────────────────────────────
-  static const Color background = Color(0xFF0B0B0F);
-  static const Color surface = Color(0xFF131318);
-  static const Color surfaceCard = Color(0xFF1A1A21);
-  static const Color surfaceElevated = Color(0xFF23232C);
-  static const Color border = Color(0xFF2C2C36);
-  static const Color borderBright = Color(0xFF45454F);
+  static const Color background = Color(0xFFF6F7F9);
+  static const Color surface = Colors.white;
+  static const Color surfaceCard = Colors.white;
+  static const Color surfaceElevated = Color(0xFFF0F1F4);
+  static const Color border = Color(0xFFE2E4E9);
+  static const Color borderBright = Color(0xFFCDD1D8);
 
-  static const Color primary = Color(0xFFE0FF00); // neon lime brand accent
-  static const Color onPrimary = Color(0xFF0B0B0F); // text/icons on lime
-  static const Color accent = Color(0xFFFF2E88); // hot pink
-  static const Color accentLight = Color(0xFFFF6FAE);
+  static const Color primary = Color(0xFF2155C4); // the one accent colour
+  static const Color onPrimary = Colors.white;
 
-  static const Color gold = Color(0xFFFBBF24);
-  static const Color success = Color(0xFF22C55E);
-  static const Color warning = Color(0xFFF59E0B);
-  static const Color error = Color(0xFFFF5A5F);
+  static const Color gold = Color(0xFFE5A100); // rating star
+  static const Color success = Color(0xFF15803D);
+  static const Color warning = Color(0xFFB45309);
+  static const Color error = Color(0xFFC62828);
 
-  static const Color textPrimary = Color(0xFFF5F5F7);
-  static const Color textSecondary = Color(0xFFB4B4BE);
-  static const Color textMuted = Color(0xFF8B8B96); // ≥4.5:1 on background
-
-  // ── Source badge colors ───────────────────────────────────────────────────
-  static const Color amazonColor = Color(0xFFFF9900);
-  static const Color flipkartColor = Color(0xFF4C8DFF);
-  static const Color webColor = Color(0xFF34D399);
+  static const Color textPrimary = Color(0xFF1C1E22);
+  static const Color textSecondary = Color(0xFF4B5059);
+  static const Color textMuted = Color(0xFF6B7280); // ≥4.5:1 on white
 
   // ── Shape ─────────────────────────────────────────────────────────────────
-  static const double radiusSm = 10;
-  static const double radiusMd = 14;
-  static const double radiusLg = 20;
+  static const double radiusSm = 8;
+  static const double radiusMd = 10;
+  static const double radiusLg = 12;
 
-  // ── Gradients ─────────────────────────────────────────────────────────────
-  static const LinearGradient primaryGradient = LinearGradient(
-    colors: [primary, Color(0xFF9DFF6B)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const LinearGradient brandGradient = LinearGradient(
-    colors: [primary, accent],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const LinearGradient recommendGradient = LinearGradient(
-    colors: [Color(0xFF1C1F12), Color(0xFF17171E)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  // ── Source helpers ────────────────────────────────────────────────────────
-  static Color sourceColor(String source) {
-    switch (source.toLowerCase()) {
-      case 'amazon':
-        return amazonColor;
-      case 'flipkart':
-        return flipkartColor;
-      default:
-        return webColor;
-    }
-  }
-
+  // ── Store helpers ─────────────────────────────────────────────────────────
   static IconData sourceIcon(String source) {
     switch (source.toLowerCase()) {
       case 'amazon':
-        return Icons.shopping_bag_rounded;
       case 'flipkart':
-        return Icons.local_mall_rounded;
+        return Icons.shopping_bag_outlined;
       default:
-        return Icons.storefront_rounded;
+        return Icons.storefront_outlined;
     }
   }
 
   // ── Text ──────────────────────────────────────────────────────────────────
-  static TextStyle display(double size, {FontWeight weight = FontWeight.w700, Color color = textPrimary}) =>
-      GoogleFonts.outfit(fontSize: size, fontWeight: weight, color: color, letterSpacing: -0.3, height: 1.2);
+  static TextStyle display(double size, {FontWeight weight = FontWeight.w600, Color color = textPrimary}) =>
+      TextStyle(fontSize: size, fontWeight: weight, color: color, height: 1.25);
 
+  /// Small grey section label, e.g. "All results".
   static const TextStyle overline = TextStyle(
     color: textMuted,
-    fontSize: 11,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 1.4,
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
   );
 
   // ── ThemeData ─────────────────────────────────────────────────────────────
-  static ThemeData get dark {
-    final base = ThemeData(brightness: Brightness.dark, useMaterial3: true);
-    final textTheme = GoogleFonts.interTextTheme(base.textTheme).apply(
-      bodyColor: textPrimary,
-      displayColor: textPrimary,
-    );
+  static ThemeData get light {
+    final base = ThemeData(brightness: Brightness.light, useMaterial3: true);
+    final textTheme = base.textTheme.apply(bodyColor: textPrimary, displayColor: textPrimary);
+    final rounded = RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd));
 
     return base.copyWith(
       scaffoldBackgroundColor: background,
-      colorScheme: const ColorScheme.dark(
+      colorScheme: const ColorScheme.light(
         primary: primary,
         onPrimary: onPrimary,
-        secondary: accent,
-        onSecondary: Colors.white,
+        secondary: primary,
+        onSecondary: onPrimary,
         surface: surface,
         onSurface: textPrimary,
         surfaceContainerHighest: surfaceElevated,
@@ -112,15 +73,15 @@ class AppTheme {
         onError: Colors.white,
       ),
       textTheme: textTheme,
-      splashFactory: InkSparkle.splashFactory,
       appBarTheme: AppBarTheme(
-        backgroundColor: background,
+        backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: display(20),
+        titleTextStyle: display(18),
         iconTheme: const IconThemeData(color: textPrimary),
+        shape: const Border(bottom: BorderSide(color: border)),
       ),
       cardColor: surfaceCard,
       dividerColor: border,
@@ -134,79 +95,79 @@ class AppTheme {
           foregroundColor: onPrimary,
           disabledBackgroundColor: surfaceElevated,
           disabledForegroundColor: textMuted,
-          minimumSize: const Size(48, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          textStyle: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
+          minimumSize: const Size(48, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+          shape: rounded,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: textPrimary,
-          minimumSize: const Size(48, 48),
+          minimumSize: const Size(48, 46),
           side: const BorderSide(color: borderBright),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          shape: rounded,
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: primary,
-          textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surfaceCard,
+        fillColor: surface,
         hintStyle: const TextStyle(color: textMuted),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: const BorderSide(color: border),
+          borderRadius: BorderRadius.circular(radiusLg),
+          borderSide: const BorderSide(color: borderBright),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: const BorderSide(color: border),
+          borderRadius: BorderRadius.circular(radiusLg),
+          borderSide: const BorderSide(color: borderBright),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(radiusLg),
           borderSide: const BorderSide(color: primary, width: 1.4),
         ),
         disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
+          borderRadius: BorderRadius.circular(radiusLg),
+          borderSide: const BorderSide(color: border),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: surfaceElevated,
-        contentTextStyle: GoogleFonts.inter(color: textPrimary, fontSize: 14),
-        actionTextColor: primary,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
+        backgroundColor: textPrimary,
+        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 14),
+        actionTextColor: const Color(0xFF9DB9F5),
+        shape: rounded,
         behavior: SnackBarBehavior.floating,
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: surfaceCard,
+        backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusLg)),
-        titleTextStyle: display(20),
-        contentTextStyle: GoogleFonts.inter(color: textSecondary, fontSize: 14, height: 1.5),
+        titleTextStyle: display(18),
+        contentTextStyle: const TextStyle(color: textSecondary, fontSize: 14, height: 1.5),
       ),
       popupMenuTheme: PopupMenuThemeData(
-        color: surfaceElevated,
+        color: surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
-        textStyle: GoogleFonts.inter(color: textPrimary, fontSize: 14),
+        shape: rounded,
+        textStyle: const TextStyle(color: textPrimary, fontSize: 14),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: primary.withValues(alpha: 0.16),
-        height: 68,
+        indicatorColor: primary.withValues(alpha: 0.10),
+        height: 64,
         labelTextStyle: WidgetStateProperty.resolveWith(
-          (states) => GoogleFonts.inter(
+          (states) => TextStyle(
             fontSize: 12,
-            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
             color: states.contains(WidgetState.selected) ? primary : textMuted,
           ),
         ),
@@ -219,8 +180,8 @@ class AppTheme {
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(color: primary),
       tooltipTheme: TooltipThemeData(
-        decoration: BoxDecoration(color: surfaceElevated, borderRadius: BorderRadius.circular(8)),
-        textStyle: const TextStyle(color: textPrimary, fontSize: 12),
+        decoration: BoxDecoration(color: textPrimary, borderRadius: BorderRadius.circular(6)),
+        textStyle: const TextStyle(color: Colors.white, fontSize: 12),
       ),
     );
   }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 import '../models/chat_message.dart';
 import '../models/search_response.dart';
@@ -21,12 +20,10 @@ class AgentChatScreen extends StatefulWidget {
 class _AgentChatScreenState extends State<AgentChatScreen> {
   static const _maxInputChars = 500;
   static const _suggestions = [
-    (Icons.headphones_rounded, 'Noise-cancelling earbuds under ₹5,000'),
-    (Icons.laptop_mac_rounded, 'Laptop for college under ₹60,000'),
-    (Icons.directions_run_rounded, 'Running shoes for men, size 9'),
-    (Icons.photo_camera_rounded, 'Best camera phone under ₹30,000'),
-    (Icons.watch_rounded, 'Smartwatch with an AMOLED display'),
-    (Icons.soup_kitchen_rounded, 'Air fryer for a family of four'),
+    'Noise-cancelling earbuds under ₹5,000',
+    'Laptop for college under ₹60,000',
+    'Running shoes for men, size 9',
+    'Best camera phone under ₹30,000',
   ];
 
   final ApiService _api = ApiService.instance;
@@ -241,41 +238,21 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
 
   PreferredSizeWidget _appBar() {
     final status = switch (_serverOnline) {
-      true => ('Online · Amazon, Flipkart & more', AppTheme.success),
+      true => ('Online', AppTheme.success),
       false => ('Offline', AppTheme.error),
       null => ('Connecting…', AppTheme.textMuted),
     };
     return AppBar(
       titleSpacing: 16,
-      title: Row(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AgentAvatar(size: 36),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('AI Shopper', style: AppTheme.display(18)),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(color: status.$2, shape: BoxShape.circle),
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        status.$1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+          Text('AI Shopper', style: AppTheme.display(18)),
+          const SizedBox(height: 2),
+          Text(
+            status.$1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: status.$2, fontSize: 12),
           ),
         ],
       ),
@@ -283,89 +260,38 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
         IconButton(
           tooltip: 'Server address',
           onPressed: _busy ? null : _editServer,
-          icon: const Icon(Icons.dns_rounded),
+          icon: const Icon(Icons.settings_outlined),
         ),
         IconButton(
           tooltip: 'New chat',
           onPressed: _busy || _messages.isEmpty ? null : _newChat,
-          icon: const Icon(Icons.edit_square),
+          icon: const Icon(Icons.add_comment_outlined),
         ),
         const SizedBox(width: 4),
       ],
-      bottom: const PreferredSize(
-        preferredSize: Size.fromHeight(1),
-        child: Divider(height: 1),
-      ),
     );
   }
 
   Widget _welcome() {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 20),
       children: [
-        Center(
-          child: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(color: AppTheme.primary.withValues(alpha: 0.25), blurRadius: 40, spreadRadius: 2),
-              ],
-            ),
-            child: const AgentAvatar(size: 68),
-          ),
-        ).animate().scale(begin: const Offset(0.8, 0.8), duration: 450.ms, curve: Curves.easeOutBack),
-        const SizedBox(height: 22),
-        Text(
-          'What are you shopping for today?',
-          textAlign: TextAlign.center,
-          style: AppTheme.display(26),
-        ),
-        const SizedBox(height: 10),
+        Text('What do you want to buy?', style: AppTheme.display(22)),
+        const SizedBox(height: 6),
         const Text(
-          "Tell me what you need, in English, Hindi or Punjabi. I'll compare Amazon, Flipkart and "
-          'other stores, then pick the best deal for you.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14.5, height: 1.55),
-        ),
-        const SizedBox(height: 28),
-        Text('TRY ASKING', style: AppTheme.overline),
-        const SizedBox(height: 12),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final width = (constraints.maxWidth - 10) / 2;
-            return Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (var i = 0; i < _suggestions.length; i++)
-                  SizedBox(
-                    width: width,
-                    child: _SuggestionCard(
-                      icon: _suggestions[i].$1,
-                      text: _suggestions[i].$2,
-                      onTap: _serverOnline == false ? null : () => _send(_suggestions[i].$2),
-                    ),
-                  )
-                      .animate(delay: (80 + 50 * i).ms)
-                      .fadeIn(duration: 300.ms)
-                      .slideY(begin: 0.15, duration: 300.ms, curve: Curves.easeOutCubic),
-              ],
-            );
-          },
+          'Type it in English, Hindi or Punjabi. The app compares Amazon, Flipkart and other stores '
+          'and suggests one product.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14.5, height: 1.5),
         ),
         const SizedBox(height: 24),
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lock_outline_rounded, size: 13, color: AppTheme.textMuted),
-            SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                'Never share card numbers or passwords in chat.',
-                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-              ),
-            ),
-          ],
+        const Text('Examples', style: AppTheme.overline),
+        const SizedBox(height: 8),
+        for (final text in _suggestions)
+          _SuggestionCard(text: text, onTap: _serverOnline == false ? null : () => _send(text)),
+        const SizedBox(height: 16),
+        const Text(
+          'Do not share card numbers or passwords in the chat.',
+          style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
         ),
       ],
     );
@@ -412,7 +338,7 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       decoration: const BoxDecoration(
-        color: AppTheme.background,
+        color: AppTheme.surface,
         border: Border(top: BorderSide(color: AppTheme.border)),
       ),
       child: Row(
@@ -432,27 +358,24 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
               style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
               decoration: InputDecoration(
                 hintText: _searchingFor != null
-                    ? 'Finding the best deals…'
-                    : (_messages.isEmpty ? 'Describe what you want to buy…' : 'Reply or refine your search…'),
+                    ? 'Searching…'
+                    : (_messages.isEmpty ? 'For example: earbuds under ₹2,000' : 'Type a reply…'),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          AnimatedScale(
-            scale: canSend ? 1 : 0.92,
-            duration: const Duration(milliseconds: 150),
-            child: IconButton.filled(
-              tooltip: 'Send',
-              onPressed: canSend ? _send : null,
-              style: IconButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: AppTheme.onPrimary,
-                disabledBackgroundColor: AppTheme.surfaceElevated,
-                disabledForegroundColor: AppTheme.textMuted,
-                fixedSize: const Size(50, 50),
-              ),
-              icon: const Icon(Icons.arrow_upward_rounded),
+          IconButton.filled(
+            tooltip: 'Send',
+            onPressed: canSend ? _send : null,
+            style: IconButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: AppTheme.onPrimary,
+              disabledBackgroundColor: AppTheme.surfaceElevated,
+              disabledForegroundColor: AppTheme.textMuted,
+              fixedSize: const Size(48, 48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusLg)),
             ),
+            icon: const Icon(Icons.send_rounded, size: 20),
           ),
         ],
       ),
@@ -461,39 +384,30 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
 }
 
 class _SuggestionCard extends StatelessWidget {
-  final IconData icon;
   final String text;
   final VoidCallback? onTap;
 
-  const _SuggestionCard({required this.icon, required this.text, this.onTap});
+  const _SuggestionCard({required this.text, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.surfaceCard,
-      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        child: Ink(
-          height: 108,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 20, color: AppTheme.primary),
-              const Spacer(),
-              Text(
-                text,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w500, height: 1.3),
-              ),
-            ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: AppTheme.surfaceCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          side: const BorderSide(color: AppTheme.border),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Text(
+              text,
+              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14.5),
+            ),
           ),
         ),
       ),
@@ -512,7 +426,7 @@ class _OfflineBanner extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
-      color: AppTheme.error.withValues(alpha: 0.12),
+      color: const Color(0xFFFDF0F0),
       child: Row(
         children: [
           const Icon(Icons.cloud_off_rounded, size: 18, color: AppTheme.error),
@@ -527,6 +441,6 @@ class _OfflineBanner extends StatelessWidget {
           TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
-    ).animate().fadeIn(duration: 250.ms).slideY(begin: -0.3, duration: 250.ms);
+    );
   }
 }

@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -61,7 +60,6 @@ void main() {
   late List<http.Request> requests;
 
   setUp(() async {
-    GoogleFonts.config.allowRuntimeFetching = false;
     SharedPreferences.setMockInitialValues({});
     requests = [];
     var chatTurns = 0;
@@ -111,7 +109,7 @@ void main() {
     await tester.pumpWidget(const ShoppingAgentApp());
     await settle(tester);
 
-    expect(find.text('What are you shopping for today?'), findsOneWidget);
+    expect(find.text('What do you want to buy?'), findsOneWidget);
     expect(find.textContaining('Online'), findsOneWidget);
 
     await tester.tap(find.text('Running shoes for men, size 9'));

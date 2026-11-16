@@ -5,7 +5,7 @@ import '../models/search_response.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
-/// Small coloured pill naming the store a product comes from.
+/// The store a product comes from, as small grey text ("Amazon").
 class SourceBadge extends StatelessWidget {
   final String source;
   final String label;
@@ -18,36 +18,15 @@ class SourceBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = AppTheme.sourceColor(source);
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: large ? 10 : 7, vertical: large ? 5 : 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(large ? 20 : 6),
-        border: large ? Border.all(color: color.withValues(alpha: 0.4)) : null,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(AppTheme.sourceIcon(source), color: color, size: large ? 13 : 10),
-          SizedBox(width: large ? 5 : 4),
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              color: color,
-              fontSize: large ? 11 : 9.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
-            ),
-          ),
-        ],
-      ),
+    return Text(
+      label,
+      style: TextStyle(color: AppTheme.textMuted, fontSize: large ? 14 : 12.5, fontWeight: FontWeight.w500),
     );
   }
 }
 
 /// Product photo on a white tile (store photos are shot on white), with a
-/// store-coloured icon when there is no image or it fails to load.
+/// plain icon when there is no image or it fails to load.
 class ProductImage extends StatelessWidget {
   final Product product;
   final double size;
@@ -57,11 +36,10 @@ class ProductImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = AppTheme.sourceColor(product.source);
     final fallback = Container(
       color: AppTheme.surfaceElevated,
       alignment: Alignment.center,
-      child: Icon(AppTheme.sourceIcon(product.source), color: color.withValues(alpha: 0.5), size: size * 0.36),
+      child: Icon(AppTheme.sourceIcon(product.source), color: AppTheme.textMuted, size: size * 0.36),
     );
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
@@ -101,21 +79,25 @@ class RatingLabel extends StatelessWidget {
       label: 'Rated ${product.displayRating} out of 5'
           '${product.displayReviews.isNotEmpty ? ' from ${product.displayReviews} reviews' : ''}',
       excludeSemantics: true,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.star_rounded, color: AppTheme.gold, size: size + 3),
-          const SizedBox(width: 3),
-          Text(
-            product.displayRating,
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: size, fontWeight: FontWeight.w700),
+      // One line of text, so it shortens with "…" instead of overflowing in tight rows.
+      child: Text.rich(
+        TextSpan(children: [
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Icon(Icons.star_rounded, color: AppTheme.gold, size: size + 3),
+          ),
+          TextSpan(
+            text: ' ${product.displayRating}',
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: size, fontWeight: FontWeight.w600),
           ),
           if (product.displayReviews.isNotEmpty)
-            Text(
-              ' · ${product.displayReviews}',
+            TextSpan(
+              text: ' (${product.displayReviews})',
               style: TextStyle(color: AppTheme.textMuted, fontSize: size - 0.5),
             ),
-        ],
+        ]),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

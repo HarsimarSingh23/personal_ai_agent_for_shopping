@@ -9,7 +9,7 @@ import '../widgets/source_filter_bar.dart';
 import 'product_detail_screen.dart';
 
 enum SortOption {
-  relevance('Best match', Icons.auto_awesome_outlined),
+  relevance('Best match', Icons.check_rounded),
   priceLow('Price: low to high', Icons.arrow_upward_rounded),
   priceHigh('Price: high to low', Icons.arrow_downward_rounded),
   rating('Top rated', Icons.star_outline_rounded);
@@ -90,7 +90,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Results', style: AppTheme.display(19)),
+            Text('Results', style: AppTheme.display(18)),
             if (r.query.isNotEmpty)
               Text(
                 r.query,
@@ -150,9 +150,8 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Row(
                 children: [
-                  Text('ALL OPTIONS', style: AppTheme.overline),
-                  const SizedBox(width: 12),
-                  const Expanded(child: Divider()),
+                  const Text('All results', style: AppTheme.overline),
+                  const Spacer(),
                   if (_sort != SortOption.relevance) ...[
                     const SizedBox(width: 12),
                     Text(
