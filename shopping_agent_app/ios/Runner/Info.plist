@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AI Shopper connects to the shopping agent server running on a computer on your Wi-Fi.</string>
 </dict>
 </plist>
