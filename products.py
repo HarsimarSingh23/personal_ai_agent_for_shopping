@@ -12,12 +12,14 @@ numeric companions so clients can sort and compare reliably:
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 
 _NA = "N/A"
 
 ACCESSORY_KEYWORDS = (
     "bag", "case", "cover", "sleeve", "backpack", "charger", "adapter",
     "stand", "skin", "cable", "screen guard", "tempered glass", "protector",
+    "adaptor", "carrycase", "pouch",
 )
 
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
@@ -136,6 +138,102 @@ def normalize_all(products: list[dict], source: str | None = None) -> list[dict]
         seen.add(key)
         out.append(item)
     return out
+
+
+# ── Query helpers (used by the store scrapers) ──────────────────────────────
+
+_BUDGET = re.compile(
+    r"\b(?:under|below|upto|up\s+to|within|less\s+than|max|budget(?:\s+of)?)\s*"
+    r"(?:rs\.?|₹|inr)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|lakhs?|lacs?)?\b",
+    re.IGNORECASE,
+)
+_QUERY_STOPWORDS = {
+    "buy", "online", "india", "best", "price", "prices", "cheap", "with", "for", "and", "the",
+    "from", "new", "latest", "top", "good", "rupees", "around", "size", "pack", "set",
+    "of", "in", "to", "on", "by", "an", "is", "my", "me", "it", "or", "rs", "inr", "want", "need",
+    # Who/what it is for — the chat adds these ("college laptop", "gym earbuds"), but
+    # product names never contain them.
+    "college", "school", "office", "gym", "call", "calls", "home", "kid", "kids", "student",
+    "students", "daily", "use", "travel", "gift", "beginner", "beginners", "work", "study",
+    "mic", "mics",
+}
+# A title using any of these words also counts as a match for the key word.
+_SYNONYMS = {
+    "wireless": ("tws", "bluetooth"),
+    "earbud": ("buds", "tws", "airpods", "earphone"),
+    "earphone": ("earbud", "buds", "headphone", "neckband"),
+    "headphone": ("headset", "earphone"),
+    "laptop": ("notebook", "macbook", "chromebook"),
+    "phone": ("mobile", "smartphone", "iphone"),
+    "mobile": ("phone", "smartphone", "iphone"),
+    "smartphone": ("phone", "mobile", "iphone"),
+    "tv": ("television",),
+    "television": ("tv",),
+    "fridge": ("refrigerator",),
+    "refrigerator": ("fridge",),
+    "watch": ("smartwatch",),
+    "smartwatch": ("watch",),
+}
+
+
+def split_budget(query: str) -> tuple[str, float | None]:
+    """'earbuds under ₹3,000' → ('earbuds', 3000.0); '…under 1.5 lakh' → 150000."""
+    match = _BUDGET.search(query)
+    if not match:
+        return query.strip(), None
+    amount = float(match.group(1).replace(",", ""))
+    unit = (match.group(2) or "").lower()
+    amount *= 1_000 if unit in {"k", "thousand"} else 100_000 if unit.startswith(("lakh", "lac")) else 1
+    cleaned = " ".join((query[:match.start()] + " " + query[match.end():]).split())
+    cleaned = re.sub(r"\b(?:rs\.?|inr|rupees)\s*$", "", cleaned, flags=re.IGNORECASE).strip()
+    return cleaned, (amount if amount > 0 else None)
+
+
+def query_keywords(query: str) -> list[str]:
+    """Words that say what the product is: 'men running shoes' → men, running, shoe."""
+    words = re.findall(r"[a-z0-9]+", split_budget(query)[0].lower())
+    keep = []
+    for w in words:
+        has_letter = any(c.isalpha() for c in w)
+        if w in _QUERY_STOPWORDS or (has_letter and len(w) < 2):
+            continue
+        if not has_letter and not 2 <= len(w) <= 4:   # "15" in "iphone 15" counts, "9" does not
+            continue
+        keep.append(_singular(w) if has_letter else w)
+    return keep
+
+
+def _singular(word: str) -> str:
+    """shoes → shoe, watches → watch, batteries → battery; wireless stays."""
+    if len(word) <= 3:
+        return word
+    if word.endswith(("ches", "shes", "sses", "xes")):
+        return word[:-2]
+    if word.endswith("ies"):
+        return word[:-3] + "y"
+    if word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
+def is_relevant(keywords: list[str], title: str, url: str = "") -> bool:
+    """True when the title/link mentions enough of the query's product words.
+
+    Two words → both must appear; longer queries → at least half. This drops
+    a "shoe rack" for "running shoes" but keeps "Noise Buds Earbuds" for
+    "wireless earbuds".
+    """
+    if not keywords:
+        return True
+    text = f"{title} {urlparse(url).path}".lower().replace("-", " ").replace("_", " ")
+    compact = re.sub(r"[^a-z0-9]", "", text)
+    hits = sum(
+        1 for kw in keywords
+        if any(re.search(rf"\b{re.escape(w)}", text) or (len(w) >= 5 and w in compact)
+               for w in (kw, *_SYNONYMS.get(kw, ())))
+    )
+    needed = len(keywords) if len(keywords) <= 2 else (len(keywords) + 1) // 2
+    return hits >= needed
 
 
 def wants_accessory(query: str) -> bool:

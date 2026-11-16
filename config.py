@@ -58,6 +58,7 @@ class Settings:
     # ── Agent ───────────────────────────────────────────────────────────────
     scrape_timeout_seconds: int = 45
     scraper_workers: int = 16
+    scrape_pages: int = 2                   # result pages read per store (1–5)
     max_chat_messages: int = 30             # older turns are dropped from the prompt
     max_message_chars: int = 2000
 
@@ -82,6 +83,7 @@ class Settings:
             rate_limit_read_per_min=_int("RATE_LIMIT_READ_PER_MIN", 120),
             scrape_timeout_seconds=_int("SCRAPE_TIMEOUT_SECONDS", 45),
             scraper_workers=_int("SCRAPER_WORKERS", 16),
+            scrape_pages=max(1, min(5, _int("SCRAPE_PAGES", 2))),
             max_chat_messages=_int("MAX_CHAT_MESSAGES", 30),
             max_message_chars=_int("MAX_MESSAGE_CHARS", 2000),
         )

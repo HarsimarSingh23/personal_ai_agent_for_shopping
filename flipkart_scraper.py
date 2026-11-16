@@ -15,9 +15,12 @@ from urllib.parse import quote_plus
 
 from curl_cffi import requests
 
+from config import settings
+
 log = logging.getLogger(__name__)
 
-MAX_RESULTS = 10
+PAGES = settings.scrape_pages     # SCRAPE_PAGES, default 2
+MAX_RESULTS = 20 * PAGES          # one search page holds about 24–40 products
 FLIPKART_BASE = "https://www.flipkart.com"
 _STATE_MARKER = "window.__INITIAL_STATE__"
 _IMPERSONATE = ("chrome", "safari", "edge")
@@ -82,21 +85,41 @@ def _price(pricing: dict):
     return price
 
 
-def scrape_flipkart(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
-    log.info("Scraping Flipkart for: '%s'", query)
-    html = _fetch(f"{FLIPKART_BASE}/search?q={quote_plus(query)}&otracker=search")
-    if not html:
-        log.error("Could not fetch Flipkart search page.")
-        return []
-
-    state = _extract_state(html)
-    if state is None:
-        log.error("No __INITIAL_STATE__ in Flipkart HTML — layout changed or bot protection is active.")
-        return []
-
+def scrape_flipkart(query: str, max_results: int = MAX_RESULTS, pages: int = PAGES) -> list[dict]:
+    """Flipkart search results from up to `pages` pages (page 2+ only if more are needed)."""
+    log.info("Scraping Flipkart for: '%s' (up to %d pages)", query, pages)
     results: list[dict] = []
     seen_urls: set[str] = set()
-    for p in _find_products(state):
+
+    for page in range(1, pages + 1):
+        if len(results) >= max_results:
+            break
+        if page > 1:
+            time.sleep(random.uniform(0.8, 1.6))
+        url = f"{FLIPKART_BASE}/search?q={quote_plus(query)}&otracker=search"
+        if page > 1:
+            url += f"&page={page}"
+        # Page 1 is retried; a failed later page just ends the search with what we have.
+        html = _fetch(url, attempts=3 if page == 1 else 1)
+        state = _extract_state(html) if html else None
+        if state is None:
+            if page == 1:
+                log.error("Could not read the Flipkart search page — layout changed or bot protection is active.")
+            else:
+                log.info("Flipkart page %d not available; keeping %d products.", page, len(results))
+            break
+        before = len(results)
+        _add_products(_find_products(state), results, seen_urls, max_results)
+        log.info("Flipkart page %d: %d new products.", page, len(results) - before)
+        if len(results) == before:
+            break   # an empty page means there are no more results
+
+    log.info("Flipkart: %d products returned.", len(results))
+    return results
+
+
+def _add_products(products: list[dict], results: list[dict], seen_urls: set[str], max_results: int) -> None:
+    for p in products:
         if len(results) >= max_results:
             break
         try:
@@ -124,9 +147,6 @@ def scrape_flipkart(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
             })
         except Exception as e:
             log.warning("Error parsing a Flipkart product: %s", e)
-
-    log.info("Flipkart: %d products returned.", len(results))
-    return results
 
 
 if __name__ == "__main__":

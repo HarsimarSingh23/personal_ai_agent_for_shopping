@@ -1,3 +1,5 @@
+import pytest
+
 import sqlite3
 
 from sqlalchemy import inspect
@@ -30,3 +32,16 @@ def test_init_db_migrates_legacy_table(tmp_path, monkeypatch):
     assert storage.load_sessions(client_id="device-aaaaaaaa") == []
 
     storage.init_db()  # idempotent
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("postgresql://u:p@db:5432/shop", "postgresql+psycopg2://u:p@db:5432/shop"),
+    ("postgres://u:p@db:5432/shop", "postgresql+psycopg2://u:p@db:5432/shop"),
+    ("postgresql+psycopg://u:p@db/shop", "postgresql+psycopg://u:p@db/shop"),   # explicit driver kept
+    ("sqlite:////tmp/x.db", "sqlite:////tmp/x.db"),
+])
+def test_database_url_names_the_installed_postgres_driver(monkeypatch, raw, expected):
+    """SQLAlchemy 2.1 defaults "postgresql://" to psycopg 3, which we don't install."""
+    import storage
+    monkeypatch.setenv("DATABASE_URL", raw)
+    assert storage._database_url() == expected
