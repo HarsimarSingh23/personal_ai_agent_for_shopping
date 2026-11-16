@@ -16,10 +16,13 @@ try:
 except ImportError:
     raise ImportError("'curl_cffi' not found. Run: pip install curl_cffi")
 
+from config import settings
+
 log = logging.getLogger(__name__)
 
 AMAZON_BASE    = "https://www.amazon.in"
-MAX_RESULTS    = 10
+PAGES          = settings.scrape_pages          # SCRAPE_PAGES, default 2
+MAX_RESULTS    = 16 * PAGES                     # one search page has about 16 products
 
 _CARD_SELECTORS = [
     "div[data-component-type='s-search-result']",
@@ -28,6 +31,9 @@ _CARD_SELECTORS = [
 
 _FIELD_SELECTORS = {
     "title": [
+        # 2026 layout: brand in h2.s-line-clamp-1, product name in h2.a-text-normal.
+        "h2.a-text-normal span",
+        "h2.a-text-normal",
         "h2.a-size-mini a span",
         "h2 a.a-link-normal span",
         "span.a-size-medium.a-color-base.a-text-normal",
@@ -47,6 +53,7 @@ _FIELD_SELECTORS = {
     "reviews_count": [
         "span.a-size-base.s-underline-text",
         "a[href*='#customerReviews'] span.a-size-base",
+        "a[href*='customerReviews'] span",
     ],
     "url": [
         "h2 a.a-link-normal",
@@ -58,6 +65,23 @@ _FIELD_SELECTORS = {
         "img[data-image-latency='s-product-image']",
     ],
 }
+
+
+_BRAND_SELECTORS = ["h2.s-line-clamp-1:not(.a-text-normal)"]
+
+
+def _is_sponsored(card) -> bool:
+    """Paid placements are often a different product (iPhone 16 for "iphone 15")."""
+    return "AdHolder" in (card.get("class") or []) or bool(
+        card.select_one(".puis-sponsored-label-text, .s-sponsored-label-text")
+    )
+
+
+_REVIEW_LABEL_SELECTORS = [
+    "a[aria-label$=' ratings']",
+    "a[aria-label$=' rating']",
+    "span[aria-label$=' ratings']",
+]
 
 
 def _safe_text(card, selectors: list[str]) -> str | None:
@@ -88,21 +112,14 @@ def _is_captcha(html: str) -> bool:
     ))
 
 
-def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
-    results: list[dict] = []
-    
-    search_url = f"{AMAZON_BASE}/s?k={quote_plus(query)}"
-    log.info("Scraping Amazon via curl_cffi: %s", search_url)
-
-    # Use a session to maintain cookies from JS challenges
-    session = requests.Session(impersonate="safari15_5")
-
-    for attempt in range(1, 4):
+def _fetch_cards(session, url: str, attempts: int) -> list | None:
+    """Product cards of one search page, or None if Amazon blocked or changed the page."""
+    for attempt in range(1, attempts + 1):
         try:
-            log.info("Attempt %d of 3...", attempt)
-            response = session.get(search_url, timeout=15)
+            log.info("Fetching %s (attempt %d of %d)", url, attempt, attempts)
+            response = session.get(url, timeout=15)
             html = response.text
-            
+
             # Check for Akamai Interstitial Challenge
             if "triggerInterstitialChallenge" in html:
                 log.warning("Akamai Interstitial challenge detected. Attempting to solve...")
@@ -115,7 +132,7 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
                         post_data = {"bm-verify": bm_match.group(1), "pow": j_val}
                         session.post("https://www.amazon.in/_sec/verify?provider=interstitial", json=post_data, timeout=15)
                         # Fetch the page again now that we have the clearance cookie
-                        response = session.get(search_url, timeout=15)
+                        response = session.get(url, timeout=15)
                         html = response.text
                         log.info("Solved interstitial challenge.")
                     else:
@@ -123,75 +140,94 @@ def scrape(query: str, max_results: int = MAX_RESULTS) -> list[dict]:
                 else:
                     log.warning("Could not parse JS math problem.")
 
-            if response.status_code == 503:
-                log.warning("Got 503 Service Unavailable.")
-                if _is_captcha(html):
-                    log.warning("CAPTCHA detected in 503 response on attempt %d. Retrying...", attempt)
-                time.sleep(random.uniform(2, 4))
-                continue
-                
-            if _is_captcha(html):
-                log.warning("CAPTCHA detected on attempt %d. Retrying...", attempt)
-                time.sleep(random.uniform(2, 4))
-                continue
-
-            soup = BeautifulSoup(html, "html.parser")
-
-            cards = []
-            for sel in _CARD_SELECTORS:
-                cards = soup.select(sel)
-                if cards:
-                    break
-
-            if not cards:
+            if response.status_code == 503 or _is_captcha(html):
+                log.warning("Amazon blocked the request (status %s) on attempt %d.", response.status_code, attempt)
+            else:
+                soup = BeautifulSoup(html, "html.parser")
+                for sel in _CARD_SELECTORS:
+                    cards = soup.select(sel)
+                    if cards:
+                        return cards
                 log.error("No product cards found. Amazon may have changed its markup.")
-                time.sleep(random.uniform(2, 4))
-                continue
-
-            log.info("Found %d cards — extracting top %d", len(cards), max_results)
-
-            seen: set[str] = set()
-            for card in cards:
-                if len(results) >= max_results:
-                    break
-                asin = card.get("data-asin")
-                if not asin or asin in seen:
-                    continue
-                seen.add(asin)
-
-                try:
-                    title = _safe_text(card, _FIELD_SELECTORS["title"])
-                    if not title:
-                        continue
-
-                    price   = _safe_text(card, _FIELD_SELECTORS["price"])
-                    rating  = _safe_text(card, _FIELD_SELECTORS["rating"])
-                    reviews = _safe_text(card, _FIELD_SELECTORS["reviews_count"])
-                    href    = _safe_attr(card, _FIELD_SELECTORS["url"], "href")
-                    url     = href if (href and href.startswith("http")) \
-                              else (AMAZON_BASE + href if href else None)
-                    img_src = _safe_attr(card, _FIELD_SELECTORS["image"], "src")
-
-                    results.append({
-                        "title":         title   or "N/A",
-                        "price":         price   or "N/A",
-                        "rating":        rating  or "N/A",
-                        "reviews_count": reviews or "N/A",
-                        "url":           url     or "N/A",
-                        "image":         img_src or "N/A",
-                    })
-                    log.debug("  [%d] %s", len(results), title[:70])
-
-                except Exception as e:
-                    log.warning("Skipped a card: %s", e)
-                    continue
-
-            if results:
-                break
-
         except Exception as e:
             log.error("Error on attempt %d: %s", attempt, e)
+        if attempt < attempts:
             time.sleep(random.uniform(2, 4))
+    return None
+
+
+def _parse_card(card) -> dict | None:
+    title = _safe_text(card, _FIELD_SELECTORS["title"])
+    if not title:
+        return None
+    brand = _safe_text(card, _BRAND_SELECTORS)
+    if brand and brand != title and not title.lower().startswith(brand.lower()):
+        title = f"{brand} {title}"      # "Apple" + "iPhone 15 (128 GB)"
+
+    price   = _safe_text(card, _FIELD_SELECTORS["price"])
+    rating  = _safe_text(card, _FIELD_SELECTORS["rating"])
+    # Amazon (2026) shows "(53.4K)" with aria-label "53,496 ratings"; the label is exact.
+    reviews = (_safe_attr(card, _REVIEW_LABEL_SELECTORS, "aria-label")
+               or _safe_text(card, _FIELD_SELECTORS["reviews_count"]))
+    href    = _safe_attr(card, _FIELD_SELECTORS["url"], "href")
+    url     = href if (href and href.startswith("http")) \
+              else (AMAZON_BASE + href if href else None)
+    img_src = _safe_attr(card, _FIELD_SELECTORS["image"], "src")
+
+    return {
+        "title":         title   or "N/A",
+        "price":         price   or "N/A",
+        "rating":        rating  or "N/A",
+        "reviews_count": reviews or "N/A",
+        "url":           url     or "N/A",
+        "image":         img_src or "N/A",
+    }
+
+
+def scrape(query: str, max_results: int = MAX_RESULTS, pages: int = PAGES) -> list[dict]:
+    """Amazon.in search results from up to `pages` result pages.
+
+    Page 1 is retried if Amazon blocks it. Later pages are tried once, after a
+    short pause; if one is blocked we keep what we already have.
+    """
+    results: list[dict] = []
+    seen: set[str] = set()
+    search_url = f"{AMAZON_BASE}/s?k={quote_plus(query)}"
+    log.info("Scraping Amazon via curl_cffi: %s (up to %d pages)", search_url, pages)
+
+    # Use a session to maintain cookies from JS challenges
+    session = requests.Session(impersonate="safari15_5")
+
+    for page in range(1, pages + 1):
+        if len(results) >= max_results:
+            break
+        if page > 1:
+            time.sleep(random.uniform(1.0, 2.0))
+        url = search_url if page == 1 else f"{search_url}&page={page}"
+        cards = _fetch_cards(session, url, attempts=3 if page == 1 else 1)
+        if not cards:
+            if page > 1:
+                log.info("Amazon page %d not available; keeping %d products.", page, len(results))
+            break
+
+        before = len(results)
+        for card in cards:
+            if len(results) >= max_results:
+                break
+            asin = card.get("data-asin")
+            # Sponsored check first, so an ad doesn't hide the same product's normal listing.
+            if not asin or asin in seen or _is_sponsored(card):
+                continue
+            seen.add(asin)
+            try:
+                item = _parse_card(card)
+            except Exception as e:
+                log.warning("Skipped a card: %s", e)
+                continue
+            if item:
+                results.append(item)
+                log.debug("  [%d] %s", len(results), item["title"][:70])
+        log.info("Amazon page %d: %d cards, %d new products.", page, len(cards), len(results) - before)
 
     log.info("Scrape complete — %d products returned.", len(results))
     return results

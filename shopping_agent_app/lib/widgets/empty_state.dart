@@ -1,5 +1,4 @@
 ﻿import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 import '../theme/app_theme.dart';
 
@@ -37,8 +36,8 @@ class EmptyState extends StatelessWidget {
           'Try again',
         ),
       EmptyStateType.noHistory => (
-          Icons.history_toggle_off_rounded,
-          AppTheme.primary,
+          Icons.history_rounded,
+          AppTheme.textMuted,
           'No searches yet',
           'Ask the assistant for something you want to buy. Your searches will show up here.',
           'Start shopping',
@@ -51,18 +50,9 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 84,
-              height: 84,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-                border: Border.all(color: color.withValues(alpha: 0.18), width: 1.5),
-              ),
-              child: Icon(icon, size: 38, color: color.withValues(alpha: 0.8)),
-            ),
-            const SizedBox(height: 22),
-            Text(title, style: AppTheme.display(19), textAlign: TextAlign.center),
+            Icon(icon, size: 40, color: color),
+            const SizedBox(height: 16),
+            Text(title, style: AppTheme.display(18), textAlign: TextAlign.center),
             const SizedBox(height: 8),
             Text(
               subtitle,
@@ -80,6 +70,6 @@ class EmptyState extends StatelessWidget {
           ],
         ),
       ),
-    ).animate().fadeIn(duration: 400.ms);
+    );
   }
 }

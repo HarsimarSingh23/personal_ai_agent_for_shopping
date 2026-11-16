@@ -44,10 +44,12 @@ services:
       GEMINI_API_KEY:             ${GEMINI_API_KEY:-}
       LLM_TIMEOUT_SECONDS:        ${LLM_TIMEOUT_SECONDS:-30}
       SCRAPE_TIMEOUT_SECONDS:     ${SCRAPE_TIMEOUT_SECONDS:-45}
+      SCRAPE_PAGES:               ${SCRAPE_PAGES:-2}
       RATE_LIMIT_SEARCH_PER_MIN:  ${RATE_LIMIT_SEARCH_PER_MIN:-10}
       RATE_LIMIT_CHAT_PER_MIN:    ${RATE_LIMIT_CHAT_PER_MIN:-30}
       LOG_FORMAT:                 ${LOG_FORMAT:-json}
       AGENT_MONITOR:              ${AGENT_MONITOR:-0}
+      ENABLE_DOCS:                ${ENABLE_DOCS:-false}
       WEB_CONCURRENCY:            ${WEB_CONCURRENCY:-1}
       FORWARDED_ALLOW_IPS:        ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     depends_on:

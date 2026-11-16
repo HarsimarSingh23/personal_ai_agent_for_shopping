@@ -1,8 +1,8 @@
 """
 pipeline.py — The search pipeline behind POST /api/search.
 
-    translate → parallel scrape (Amazon, Flipkart, web) → normalise →
-    accessory filter → LLM recommendation
+    translate → parallel scrape (Amazon, Flipkart, other stores) → normalise →
+    accessory and budget filters → LLM recommendation
 
 Scrapers run on a shared, long-lived thread pool. The request waits at most
 SCRAPE_TIMEOUT_SECONDS; a slow source is reported as "timeout" and the
@@ -21,13 +21,13 @@ from contextlib import nullcontext
 
 import monitoring
 from config import settings
-from ddg_scraper import scrape_ddg as _scrape_ddg
 from flipkart_scraper import scrape_flipkart as _scrape_flipkart
 from llm import LLMConfigError
 from llm import recommend as _recommend
 from llm import translate_query as _translate_query
-from products import is_accessory, normalize_all, wants_accessory
+from products import is_accessory, normalize_all, split_budget, wants_accessory
 from scraper import scrape as _scrape_amazon
+from store_scraper import scrape_other_stores as _scrape_other_stores
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 translate_query = monitoring.tool(_translate_query, "translate_query")
 scrape_amazon = monitoring.tool(_scrape_amazon, "scrape_amazon")
 scrape_flipkart = monitoring.tool(_scrape_flipkart, "scrape_flipkart")
-scrape_ddg = monitoring.tool(_scrape_ddg, "scrape_ddg")
+scrape_web = monitoring.tool(_scrape_other_stores, "scrape_web")
 recommend = monitoring.tool(_recommend, "recommend")
 
 SOURCES = ("amazon", "flipkart", "web")
@@ -67,7 +67,7 @@ def scrape_all(query: str, timeout: float | None = None) -> tuple[dict[str, list
     """
     timeout = settings.scrape_timeout_seconds if timeout is None else timeout
     # Looked up at call time so tests can monkeypatch the module attributes.
-    jobs = {"amazon": scrape_amazon, "flipkart": scrape_flipkart, "web": scrape_ddg}
+    jobs = {"amazon": scrape_amazon, "flipkart": scrape_flipkart, "web": scrape_web}
 
     pool = _get_pool()
     futures = {}
@@ -109,6 +109,25 @@ def drop_accessories(results: dict[str, list[dict]], query: str) -> dict[str, li
     return filtered if any(filtered.values()) else results
 
 
+def drop_over_budget(results: dict[str, list[dict]], query: str) -> dict[str, list[dict]]:
+    """For "laptop under 50000", hide items that cost more.
+
+    Items without a known price are kept (the shop page may still show one).
+    If no priced item fits the budget, nothing is hidden.
+    """
+    _, max_price = split_budget(query)
+    if max_price is None:
+        return results
+    fits = [p for items in results.values() for p in items
+            if p.get("price_value") is not None and p["price_value"] <= max_price]
+    if not fits:
+        return results
+    return {
+        site: [p for p in items if p.get("price_value") is None or p["price_value"] <= max_price]
+        for site, items in results.items()
+    }
+
+
 def _fallback_recommendation(products: list[dict]) -> dict:
     best = max(products, key=lambda p: (p.get("rating_value") or 0, p.get("reviews_value") or 0))
     return {"product": best, "reason": "Our AI is busy right now, so this is the highest-rated option we found."}
@@ -132,7 +151,7 @@ def run_search(user_input: str, mon=None) -> dict:
     t0 = time.perf_counter()
     with mon.turn("scrape") if mon else nullcontext():
         results, status = scrape_all(english_query)
-    results = drop_accessories(results, english_query)
+    results = drop_over_budget(drop_accessories(results, english_query), english_query)
     combined = [p for site in SOURCES for p in results[site]]
     log.info(
         "📦 Scrape done: amazon=%d flipkart=%d web=%d (%.0fms)",

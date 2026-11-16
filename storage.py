@@ -49,7 +49,14 @@ def _database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
     if url:
         # Heroku/Render style URLs use the deprecated "postgres://" scheme.
-        return url.replace("postgres://", "postgresql://", 1)
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url.removeprefix("postgres://")
+        # Name the driver we install (psycopg2-binary). SQLAlchemy 2.1 changed the
+        # default for plain "postgresql://" to psycopg 3, which crashed the
+        # Docker image on start with "No module named 'psycopg'".
+        if url.startswith("postgresql://"):
+            url = "postgresql+psycopg2://" + url.removeprefix("postgresql://")
+        return url
     results_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
     os.makedirs(results_dir, exist_ok=True)
     return f"sqlite:///{os.path.join(results_dir, 'sessions.db')}"

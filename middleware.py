@@ -43,6 +43,11 @@ class _JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str = "INFO", fmt: str = "text") -> None:
+    # Windows consoles default to cp1252; log lines contain "→", "₹" and emoji.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(_RequestIdFilter())
     if fmt == "json":

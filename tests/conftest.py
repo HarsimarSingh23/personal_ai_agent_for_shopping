@@ -47,7 +47,7 @@ def client(monkeypatch):
     monkeypatch.setattr(pipeline, "translate_query", lambda q: "wireless headphones")
     monkeypatch.setattr(pipeline, "scrape_amazon", lambda q: [dict(p) for p in AMAZON])
     monkeypatch.setattr(pipeline, "scrape_flipkart", lambda q: [dict(p) for p in FLIPKART])
-    monkeypatch.setattr(pipeline, "scrape_ddg", lambda q: [dict(p) for p in WEB])
+    monkeypatch.setattr(pipeline, "scrape_web", lambda q: [dict(p) for p in WEB])
     monkeypatch.setattr(
         pipeline, "recommend",
         lambda q, products: {"product": products[0], "reason": "Best balance of price and reviews."},

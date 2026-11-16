@@ -11,10 +11,10 @@ Future<void> main() async {
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light, // light icons on the dark UI
-    statusBarBrightness: Brightness.dark, // iOS
+    statusBarIconBrightness: Brightness.dark, // dark icons on the light UI
+    statusBarBrightness: Brightness.light, // iOS
     systemNavigationBarColor: AppTheme.surface,
-    systemNavigationBarIconBrightness: Brightness.light,
+    systemNavigationBarIconBrightness: Brightness.dark,
   ));
   await ApiService.instance.init();
   runApp(const ShoppingAgentApp());
@@ -28,9 +28,8 @@ class ShoppingAgentApp extends StatelessWidget {
     return MaterialApp(
       title: 'AI Shopper',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
-      darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.dark,
+      theme: AppTheme.light,
+      themeMode: ThemeMode.light,
       // On tablets and the web, keep a comfortable reading width.
       builder: (context, child) => ColoredBox(
         color: AppTheme.background,
@@ -83,9 +82,9 @@ class _RootNavigatorState extends State<RootNavigator> {
           onDestinationSelected: _onSelect,
           destinations: const [
             NavigationDestination(
-              icon: Icon(Icons.chat_bubble_outline_rounded),
-              selectedIcon: Icon(Icons.chat_bubble_rounded),
-              label: 'Assistant',
+              icon: Icon(Icons.search_rounded),
+              selectedIcon: Icon(Icons.search_rounded),
+              label: 'Search',
             ),
             NavigationDestination(
               icon: Icon(Icons.history_rounded),

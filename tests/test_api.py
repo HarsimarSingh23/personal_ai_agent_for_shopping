@@ -35,7 +35,7 @@ def test_search_returns_normalised_results_and_saves_session(client):
 
 
 def test_search_with_no_results(client, monkeypatch):
-    for name in ("scrape_amazon", "scrape_flipkart", "scrape_ddg"):
+    for name in ("scrape_amazon", "scrape_flipkart", "scrape_web"):
         monkeypatch.setattr(pipeline, name, lambda q: [])
     body = client.post("/api/search", json={"query": "zzzz"}).json()
     assert body["session_id"] is None
@@ -52,7 +52,7 @@ def test_failing_and_slow_scrapers_do_not_block_the_response(client, monkeypatch
         return []
 
     monkeypatch.setattr(pipeline, "scrape_flipkart", broken)
-    monkeypatch.setattr(pipeline, "scrape_ddg", slow)
+    monkeypatch.setattr(pipeline, "scrape_web", slow)
     monkeypatch.setattr(settings, "scrape_timeout_seconds", 0.5)
     started = time.perf_counter()
     body = client.post("/api/search", json={"query": "headphones"}).json()

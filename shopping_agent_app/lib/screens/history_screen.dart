@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 import '../models/session.dart';
 import '../services/api_service.dart';
@@ -120,7 +119,7 @@ class HistoryScreenState extends State<HistoryScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('History', style: AppTheme.display(20)),
+            Text('History', style: AppTheme.display(18)),
             Text(
               count == 0 ? 'Your past searches' : '$count saved ${count == 1 ? 'search' : 'searches'}',
               style: const TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w500),
@@ -227,13 +226,13 @@ class HistoryScreenState extends State<HistoryScreen> {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
       itemCount: 6,
       itemBuilder: (_, i) => Container(
-        height: 92,
-        margin: const EdgeInsets.only(bottom: 10),
+        height: 88,
+        margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: AppTheme.surfaceCard,
+          color: AppTheme.surfaceElevated,
           borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         ),
-      ).animate(onPlay: (c) => c.repeat()).shimmer(duration: 1200.ms, color: AppTheme.surfaceElevated),
+      ),
     );
   }
 }
@@ -286,7 +285,7 @@ class _SessionTile extends StatelessWidget {
                         session.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w700),
+                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
                       ),
                       if (session.wasTranslated)
                         Padding(
@@ -298,17 +297,16 @@ class _SessionTile extends StatelessWidget {
                             style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
                           ),
                         ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          _Meta(text: timeAgo(session.timestamp)),
-                          _Meta(text: '${session.totalResults} products'),
-                          if (rec != null)
-                            _Meta(text: 'Pick ${rec.displayPrice}', color: AppTheme.primary, icon: Icons.auto_awesome),
-                        ],
+                      const SizedBox(height: 6),
+                      Text(
+                        [
+                          timeAgo(session.timestamp),
+                          '${session.totalResults} products',
+                          if (rec != null) 'best pick ${rec.displayPrice}',
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppTheme.textMuted, fontSize: 12.5),
                       ),
                     ],
                   ),
@@ -321,35 +319,6 @@ class _SessionTile extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    )
-        .animate(delay: Duration(milliseconds: 40 * (index % 10)))
-        .fadeIn(duration: 260.ms)
-        .slideY(begin: 0.05, duration: 260.ms, curve: Curves.easeOutCubic);
-  }
-}
-
-class _Meta extends StatelessWidget {
-  final String text;
-  final Color color;
-  final IconData? icon;
-
-  const _Meta({required this.text, this.color = AppTheme.textMuted, this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[Icon(icon, size: 11, color: color), const SizedBox(width: 4)],
-          Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
-        ],
       ),
     );
   }
