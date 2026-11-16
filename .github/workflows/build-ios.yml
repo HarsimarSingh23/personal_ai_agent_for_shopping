@@ -1,0 +1,121 @@
+name: Build iOS IPA
+
+# Builds an unsigned .ipa for sideloading (Sideloadly / AltStore), based on the
+# Vibiee iOS workflow. Runs when the app changes on main or task2, or by hand
+# from the Actions tab ("Run workflow"), where you can set the server address
+# the app starts with. The address can also be changed inside the app
+# (server icon at the top of the chat screen), so a new Wi-Fi IP does not
+# need a new build.
+on:
+  push:
+    branches:
+      - main
+      - task2
+    paths:
+      - 'shopping_agent_app/**'
+      - '.github/workflows/build-ios.yml'
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: 'Server address the app starts with, e.g. http://192.168.1.5:8000'
+        required: false
+        default: 'http://192.168.29.36:8000'
+      runner:
+        description: 'Mac to build on (try another if the job waits for a runner)'
+        type: choice
+        default: macos-15-intel
+        options:
+          - macos-15-intel
+          - macos-15
+          - macos-14
+
+jobs:
+  build-ios:
+    name: Build iOS App
+    # GitHub's Apple-silicon Macs (macos-15) are often out of capacity, which
+    # cancels the job after 15 minutes; the Intel image is used by default.
+    runs-on: ${{ github.event.inputs.runner || 'macos-15-intel' }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ./shopping_agent_app
+    env:
+      API_BASE_URL: ${{ github.event.inputs.api_base_url || 'http://192.168.29.36:8000' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          mkdir -p build/ios/SourcePackages
+          flutter pub get
+
+      - name: Disable Code Signing
+        run: |
+          echo "CODE_SIGNING_ALLOWED=NO" >> ios/Flutter/Release.xcconfig
+          echo "CODE_SIGNING_REQUIRED=NO" >> ios/Flutter/Release.xcconfig
+
+      - name: Build iOS App (Unsigned)
+        run: |
+          echo "App will start with server: $API_BASE_URL"
+          # First do a dry-run to generate the Podfile and necessary project files.
+          # The --dart-define is stored in Generated.xcconfig and used by xcodebuild below.
+          flutter build ios --release --no-codesign --config-only --dart-define=API_BASE_URL="$API_BASE_URL" || true
+
+          # Inject code signing settings and set platform to iOS 15.0 in the Podfile
+          if [ -f "ios/Podfile" ]; then
+            python3 -c "
+          import sys
+          import re
+          podfile = 'ios/Podfile'
+          with open(podfile, 'r') as f:
+              content = f.read()
+
+          # Force platform to iOS 15.0
+          content = re.sub(r'#?\s*platform\s+:ios\s*,\s*\'[0-9.]+\'', 'platform :ios, \'15.0\'', content)
+
+          injection = '''
+                target.build_configurations.each do |config|
+                    config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                    config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                    config.build_settings['CODE_SIGN_IDENTITY'] = '-'
+                    config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = '-'
+                end
+          '''
+          content = content.replace('flutter_additional_ios_build_settings(target)', 'flutter_additional_ios_build_settings(target)' + injection)
+          with open(podfile, 'w') as f:
+              f.write(content)
+          "
+            cd ios
+            pod install
+            cd ..
+          fi
+
+          # Force a manual xcodebuild with absolute overrides to disable all code signing
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=\"-\" EXPANDED_CODE_SIGN_IDENTITY=\"-\" -allowProvisioningUpdates=NO ONLY_ACTIVE_ARCH=NO
+
+      - name: Create IPA for Sideloading
+        run: |
+          mkdir -p Payload
+          # Explicitly copy the correct release build (avoiding any intermediate builds)
+          cp -r ios/build/Build/Products/Release-iphoneos/Runner.app Payload/
+          # Zip with -y to preserve symlinks (critical for iOS frameworks)
+          zip -qyr app.ipa Payload
+          echo "### AI Shopper iOS build" >> "$GITHUB_STEP_SUMMARY"
+          echo "Unsigned IPA for sideloading. Starts with server \`$API_BASE_URL\` (changeable in the app)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-shopper-ios-app
+          path: shopping_agent_app/app.ipa
+          retention-days: 14

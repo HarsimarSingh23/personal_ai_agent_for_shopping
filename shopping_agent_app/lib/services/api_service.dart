@@ -41,23 +41,47 @@ class ChatReply {
 }
 
 class ApiService {
-  ApiService(this._client, {String? baseUrl}) : _baseUrl = baseUrl ?? AppConfig.apiBaseUrl;
+  ApiService(this._client, {String? baseUrl}) : _fixedBaseUrl = baseUrl;
 
   /// Shared instance. Tests may replace it with one backed by a MockClient.
   static ApiService instance = ApiService(http.Client());
 
   static const _clientIdKey = 'client_id';
+  static const _serverUrlKey = 'server_url';
 
   final http.Client _client;
-  final String _baseUrl;
+  final String? _fixedBaseUrl;
   String? _clientId;
+
+  /// Read on every call, so a new address from the Server dialog applies at once.
+  String get _baseUrl => _fixedBaseUrl ?? AppConfig.apiBaseUrl;
+
+  /// The server this app is talking to.
+  String get serverUrl => _baseUrl;
 
   String get _api => '$_baseUrl/api';
 
-  /// Loads (or creates) the anonymous install ID that scopes search history.
+  /// Saves the server address typed in the app (null = use the built-in one).
+  Future<void> setServerUrl(String? url) async {
+    AppConfig.setServerOverride(url);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (AppConfig.serverOverride == null) {
+        await prefs.remove(_serverUrlKey);
+      } else {
+        await prefs.setString(_serverUrlKey, AppConfig.serverOverride!);
+      }
+    } catch (e) {
+      debugPrint('Could not save server address: $e');
+    }
+  }
+
+  /// Loads the saved server address and the anonymous install ID that scopes
+  /// search history (creating the ID on first launch).
   Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      AppConfig.setServerOverride(prefs.getString(_serverUrlKey));
       _clientId = prefs.getString(_clientIdKey);
       if (_clientId == null) {
         _clientId = _newClientId();

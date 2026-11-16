@@ -7,6 +7,7 @@ import '../models/search_response.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/chat_widgets.dart';
+import '../widgets/server_dialog.dart';
 import 'product_detail_screen.dart';
 import 'search_results_screen.dart';
 
@@ -65,6 +66,13 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
   Future<void> _checkServer() async {
     final online = await _api.checkHealth();
     if (mounted) setState(() => _serverOnline = online);
+  }
+
+  Future<void> _editServer() async {
+    final changed = await showServerDialog(context, api: _api);
+    if (!changed || !mounted) return;
+    setState(() => _serverOnline = null); // "Connecting…" while we check the new address
+    await _checkServer();
   }
 
   void _send([String? preset]) {
@@ -216,7 +224,7 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
         top: false,
         child: Column(
           children: [
-            if (_serverOnline == false) _OfflineBanner(onRetry: _checkServer),
+            if (_serverOnline == false) _OfflineBanner(onRetry: _checkServer, onChangeServer: _editServer),
             Expanded(
               child: GestureDetector(
                 onTap: () => _focus.unfocus(),
@@ -272,6 +280,11 @@ class _AgentChatScreenState extends State<AgentChatScreen> {
         ],
       ),
       actions: [
+        IconButton(
+          tooltip: 'Server address',
+          onPressed: _busy ? null : _editServer,
+          icon: const Icon(Icons.dns_rounded),
+        ),
         IconButton(
           tooltip: 'New chat',
           onPressed: _busy || _messages.isEmpty ? null : _newChat,
@@ -490,8 +503,9 @@ class _SuggestionCard extends StatelessWidget {
 
 class _OfflineBanner extends StatelessWidget {
   final VoidCallback onRetry;
+  final VoidCallback onChangeServer;
 
-  const _OfflineBanner({required this.onRetry});
+  const _OfflineBanner({required this.onRetry, required this.onChangeServer});
 
   @override
   Widget build(BuildContext context) {
@@ -509,6 +523,7 @@ class _OfflineBanner extends StatelessWidget {
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
             ),
           ),
+          TextButton(onPressed: onChangeServer, child: const Text('Change')),
           TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
