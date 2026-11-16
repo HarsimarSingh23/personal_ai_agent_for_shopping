@@ -44,9 +44,25 @@ jobs:
       - run: flutter test
 
   docker:
-    name: Docker image builds
+    name: Docker image builds and starts
     runs-on: ubuntu-latest
     needs: backend
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t shopping-agent-api:ci .
+      # Start the real stack (API + PostgreSQL) and wait for /health, so a crash
+      # on start (e.g. a missing database driver) fails CI instead of the demo.
+      - name: Start with PostgreSQL and check /health
+        env:
+          POSTGRES_PASSWORD: ci-password
+        run: |
+          docker compose up --build -d
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker compose logs api
+          exit 1
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
