@@ -20,11 +20,21 @@ on:
         description: 'Server address the app starts with, e.g. http://192.168.1.5:8000'
         required: false
         default: 'http://192.168.29.36:8000'
+      runner:
+        description: 'Mac to build on (try another if the job waits for a runner)'
+        type: choice
+        default: macos-15-intel
+        options:
+          - macos-15-intel
+          - macos-15
+          - macos-14
 
 jobs:
   build-ios:
     name: Build iOS App
-    runs-on: macos-15
+    # GitHub's Apple-silicon Macs (macos-15) are often out of capacity, which
+    # cancels the job after 15 minutes; the Intel image is used by default.
+    runs-on: ${{ github.event.inputs.runner || 'macos-15-intel' }}
     timeout-minutes: 60
     defaults:
       run:
