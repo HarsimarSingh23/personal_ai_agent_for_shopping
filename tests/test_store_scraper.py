@@ -196,3 +196,17 @@ def test_reliance_asks_for_more_products_in_one_request(monkeypatch):
     monkeypatch.setattr(store_scraper, "_get_json", lambda url: urls.append(url) or {"items": []})
     store_scraper.scrape_reliance("tv")
     assert len(urls) == 1 and f"page_size={min(100, 40 * store_scraper.PAGES)}" in urls[0]
+
+
+@pytest.mark.parametrize("query, expected", [
+    ("gaming laptop 50-60k", ("gaming laptop", 60000.0)),
+    ("50k-60k study gaming laptop", ("study gaming laptop", 60000.0)),
+    ("laptop between 50000 and 60000", ("laptop", 60000.0)),
+    ("₹50,000-₹60,000 laptop", ("laptop", 60000.0)),
+    ("phone 1-2 lakh", ("phone", 200000.0)),
+    ("laptop 8-16GB ram", ("laptop 8-16GB ram", None)),          # not a price
+    ("power bank 10000-20000 mah", ("power bank 10000-20000 mah", None)),
+    ("fridge 200-300 litres", ("fridge 200-300 litres", None)),
+])
+def test_split_budget_price_ranges_use_the_upper_limit(query, expected):
+    assert split_budget(query) == expected

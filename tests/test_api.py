@@ -117,7 +117,7 @@ def test_invalid_ids_are_rejected(client):
 def test_chat_masks_cards_and_validates_roles(client, monkeypatch):
     seen = {}
 
-    def fake_process(history):
+    def fake_process(history, shown=None):
         seen["history"] = history
         return {"message": "Budget?", "is_ready_to_search": False, "search_query": ""}
 
@@ -147,3 +147,28 @@ def test_api_key_is_enforced_when_configured(client, monkeypatch):
     assert client.get("/api/sessions", headers={"X-API-Key": "wrong"}).status_code == 401
     assert client.get("/api/sessions", headers={"X-API-Key": "s3cret"}).status_code == 200
     assert client.get("/health").status_code == 200  # probes stay open
+
+
+def test_chat_after_a_search_sees_that_devices_results(client, monkeypatch):
+    import chat_agent
+
+    client.post("/api/search", json={"query": "headphones"}, headers=DEVICE_A)   # saved as "wireless headphones"
+    prompts = []
+
+    def fake(prompt):
+        prompts.append(prompt)
+        return '{"message": "Ok", "is_ready_to_search": false}'
+
+    monkeypatch.setattr(chat_agent, "_ask", fake)
+    history = {"history": [
+        {"role": "user", "content": "headphones"},
+        {"role": "agent", "content": 'Earlier in this chat I searched for "wireless headphones" and showed the results.'},
+        {"role": "user", "content": "iski specification kya hai?"},
+    ]}
+    assert client.post("/api/chat", json=history, headers=DEVICE_A).status_code == 200
+    assert "Best pick: [Amazon] Sony WH-1000XM5 Wireless Headphones - ₹26,990" in prompts[-1]
+    assert "Why it was picked: Best balance of price and reviews." in prompts[-1]
+
+    # Another phone never sees this device's results.
+    assert client.post("/api/chat", json=history, headers=DEVICE_B).status_code == 200
+    assert "Best pick" not in prompts[-1]

@@ -36,7 +36,7 @@ log = logging.getLogger("api")
 
 import monitoring  # noqa: E402  (imported after logging is configured)
 import pipeline  # noqa: E402
-from chat_agent import process_chat  # noqa: E402
+from chat_agent import process_chat, searched_query  # noqa: E402
 from guardrails import mask_credit_card  # noqa: E402
 from llm import LLMConfigError, llm_status  # noqa: E402
 from storage import (  # noqa: E402
@@ -163,6 +163,26 @@ def _valid_session_id(session_id: str) -> str:
         raise HTTPException(status_code=404, detail="Session not found.")
 
 
+def _shown_search(history: list[dict], client_id: str | None) -> dict | None:
+    """The saved search this chat is about, so follow-up questions use the real products.
+
+    The app adds 'Earlier in this chat I searched for "<query>"…' after a search;
+    we look that query up in this device's recent searches. Without a device ID
+    (or if the database is down) the chat simply works without it.
+    """
+    query = searched_query(history)
+    if not query or not client_id:
+        return None
+    try:
+        for summary in load_sessions(limit=5, client_id=client_id, summary=True):
+            if query.lower() in {(summary.get("query_english") or "").lower(),
+                                 (summary.get("query_original") or "").lower()}:
+                return load_session_by_id(summary["session_id"], client_id=client_id)
+    except Exception as e:  # never block the chat on history lookups
+        log.warning("Could not load the shown search for chat: %s", e)
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Schemas
 # ──────────────────────────────────────────────────────────────────────────────
@@ -214,7 +234,7 @@ api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
     response_model=ChatResponse,
     dependencies=[rate_limited("chat", "rate_limit_chat_per_min")],
 )
-def chat(request: ChatRequest):
+def chat(request: ChatRequest, client_id: str | None = Depends(get_client_id)):
     """Conversational onboarding. Card numbers are masked before the LLM sees them."""
     history = [
         {
@@ -224,7 +244,7 @@ def chat(request: ChatRequest):
         for m in request.history[-settings.max_chat_messages:]
     ]
     try:
-        return process_chat(history)
+        return process_chat(history, shown=_shown_search(history, client_id))
     except LLMConfigError:
         log.error("Chat unavailable: LLM provider is not configured.")
         raise HTTPException(status_code=503, detail="The AI assistant is not available right now.")

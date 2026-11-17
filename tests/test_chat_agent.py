@@ -75,3 +75,74 @@ def test_config_error_propagates(monkeypatch):
     monkeypatch.setattr(chat_agent, "_ask", boom)
     with pytest.raises(LLMConfigError):
         chat_agent.process_chat([{"role": "user", "content": "hi"}])
+
+
+# ── Follow-up questions about the shown results ─────────────────────────────
+
+SHOWN = {
+    "query_english": "gaming laptop under 60000",
+    "recommendation": {
+        "product": {"title": "Lenovo V15 G4 AMD Ryzen 5 7520U 15.6 inch FHD Laptop", "price": "₹59,490",
+                    "source": "amazon", "url": "https://a/1", "rating_value": 4.0, "reviews_value": 538},
+        "reason": "Closest option in the budget.",
+    },
+    "results": {
+        "amazon": [{"title": "Lenovo V15 G4 AMD Ryzen 5 7520U 15.6 inch FHD Laptop", "price": "₹59,490",
+                    "source": "amazon", "url": "https://a/1", "rating_value": 4.0, "reviews_value": 538}],
+        "flipkart": [{"title": "HP Victus Ryzen 5 RTX 3050 Gaming Laptop", "price": "₹58,990",
+                      "source": "flipkart", "url": "https://f/1", "rating_value": 4.3, "reviews_value": 2100}],
+        "web": [{"title": "ASUS TUF A15 RTX 2050", "price": "₹55,990", "source": "Croma", "url": "https://c/1"}],
+    },
+}
+SEARCHED_LINE = {"role": "agent", "content": 'Earlier in this chat I searched for "gaming laptop under 60000" and showed the results.'}
+
+
+def _capture(monkeypatch, payload):
+    seen = {}
+
+    def fake(prompt):
+        seen["prompt"] = prompt
+        return json.dumps(payload)
+
+    monkeypatch.setattr(chat_agent, "_ask", fake)
+    return seen
+
+
+def test_searched_query_reads_the_apps_line():
+    assert chat_agent.searched_query([SEARCHED_LINE, {"role": "user", "content": "iski specs?"}]) == "gaming laptop under 60000"
+    assert chat_agent.searched_query([{"role": "user", "content": 'Earlier in this chat I searched for "x" and showed the results.'}]) is None
+    assert chat_agent.searched_query([{"role": "user", "content": "laptop"}]) is None
+
+
+def test_shown_results_text_lists_pick_reason_and_other_options():
+    text = chat_agent.shown_results_text(SHOWN)
+    assert "Best pick: [Amazon] Lenovo V15 G4 AMD Ryzen 5 7520U 15.6 inch FHD Laptop - ₹59,490, rated 4.0/5 from 538 reviews" in text
+    assert "Why it was picked: Closest option in the budget." in text
+    assert "1. [Flipkart] HP Victus Ryzen 5 RTX 3050 Gaming Laptop - ₹58,990" in text
+    assert "2. [Croma] ASUS TUF A15 RTX 2050 - ₹55,990" in text
+    assert text.count("Lenovo V15") == 1            # the pick is not repeated in "Other options"
+
+
+def test_follow_up_question_gets_the_real_products_in_the_prompt(monkeypatch):
+    seen = _capture(monkeypatch, {"message": "Isme Ryzen 5 7520U hai, 15.6 inch FHD screen.", "is_ready_to_search": False})
+    out = chat_agent.process_chat([SEARCHED_LINE, {"role": "user", "content": "Iski specification kya hai?"}], shown=SHOWN)
+    prompt = seen["prompt"]
+    assert "SEARCH RESULTS ALREADY SHOWN TO THE USER" in prompt
+    assert "Best pick: [Amazon] Lenovo V15 G4" in prompt
+    assert "Never invent specs" in prompt
+    assert "same script" in prompt                       # Hinglish in, Hinglish out
+    assert out["is_ready_to_search"] is False
+
+
+def test_no_results_section_without_a_shown_search(monkeypatch):
+    seen = _capture(monkeypatch, {"message": "Which budget?", "is_ready_to_search": False})
+    chat_agent.process_chat([{"role": "user", "content": "laptop"}])
+    assert "SEARCH RESULTS ALREADY SHOWN" not in seen["prompt"]
+
+
+def test_questions_about_results_do_not_force_a_search(monkeypatch):
+    _capture(monkeypatch, {"message": "Details store page par hain.", "is_ready_to_search": False})
+    history = [SEARCHED_LINE] + [{"role": "user", "content": q} for q in
+                                 ("iski specs?", "gaming ke liye theek hai?", "battery kaisi hai?", "aur warranty?")]
+    out = chat_agent.process_chat(history, shown=SHOWN)
+    assert out["is_ready_to_search"] is False           # 4 questions, still no forced search
