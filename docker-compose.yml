@@ -43,6 +43,7 @@ services:
       NVIDIA_MODEL:               ${NVIDIA_MODEL:-meta/llama-3.1-8b-instruct}
       GEMINI_API_KEY:             ${GEMINI_API_KEY:-}
       LLM_TIMEOUT_SECONDS:        ${LLM_TIMEOUT_SECONDS:-30}
+      LLM_REASONING_EFFORT:       ${LLM_REASONING_EFFORT:-low}
       SCRAPE_TIMEOUT_SECONDS:     ${SCRAPE_TIMEOUT_SECONDS:-45}
       SCRAPE_PAGES:               ${SCRAPE_PAGES:-2}
       RATE_LIMIT_SEARCH_PER_MIN:  ${RATE_LIMIT_SEARCH_PER_MIN:-10}

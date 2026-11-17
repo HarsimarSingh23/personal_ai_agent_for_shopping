@@ -27,6 +27,35 @@ def test_nvidia_hosted_api_still_requires_a_key(monkeypatch):
         llm._get_nvidia_client()
 
 
+class _FakeClient:
+    """Stands in for the OpenAI client and remembers the last request."""
+
+    def __init__(self):
+        self.kwargs = None
+        self.chat = self
+        self.completions = self
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        message = type("M", (), {"content": "ok", "reasoning_content": None})()
+        return type("R", (), {"choices": [type("C", (), {"message": message})()]})()
+
+
+@pytest.mark.parametrize("model, effort, expected", [
+    ("gpt-oss-120b", "low", "low"),                     # fast answers by default
+    ("gpt-oss-120b", "high", "high"),                   # LLM_REASONING_EFFORT can change it
+    ("gpt-oss-120b", "", None),                         # empty: the server's default
+    ("meta/llama-3.1-8b-instruct", "low", None),        # other models may reject the option
+])
+def test_reasoning_effort_is_sent_only_to_gpt_oss(monkeypatch, model, effort, expected):
+    fake = _FakeClient()
+    monkeypatch.setattr(llm, "_client", fake)
+    monkeypatch.setattr(llm, "_NVIDIA_MODEL", model)
+    monkeypatch.setattr(llm, "_REASONING_EFFORT", effort)
+    assert llm._ask_nvidia("hi") == "ok"
+    assert fake.kwargs.get("reasoning_effort") == expected
+
+
 # ── recommend() ─────────────────────────────────────────────────────────────
 
 def _products(n=3):
@@ -109,6 +138,22 @@ def test_recommend_keeps_the_ai_explanation_when_nothing_fits(monkeypatch):
     assert rec["product"] is products[2]
     assert rec["reason"] == ("No gaming laptop with a graphics card is under this budget. "
                              "This is the best-rated option we found.")
+
+
+def test_recommend_corrects_a_wrong_store_name(monkeypatch):
+    reply = '{"index": 1, "reason": "Only ₹1,001 on Flipkart, better than Amazon Basics earbuds."}'
+    monkeypatch.setattr(llm, "_ask", lambda prompt: reply)
+    rec = llm.recommend("earbuds", _products())      # product 1 is on Amazon
+    assert rec["reason"] == "Only ₹1,001 on Amazon, better than Amazon Basics earbuds."
+
+
+@pytest.mark.parametrize("source, reason, expected", [
+    ("Croma", "Buy it from Reliance Digital for ₹999.", "Buy it from Croma for ₹999."),
+    ("flipkart", "Great value at Flipkart.", "Great value at Flipkart."),        # already right
+    ("", "₹999 on Amazon.", "₹999 on Amazon."),                                  # unknown store: unchanged
+])
+def test_fix_store(source, reason, expected):
+    assert llm._fix_store(reason, {"source": source}) == expected
 
 
 def test_best_rated_ignores_ratings_from_very_few_reviews():

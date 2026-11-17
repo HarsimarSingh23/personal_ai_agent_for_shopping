@@ -48,6 +48,9 @@ _NVIDIA_MAX_TOKENS = int(os.getenv("NVIDIA_MAX_TOKENS", "16384"))
 _NVIDIA_TEMPERATURE = float(os.getenv("NVIDIA_TEMPERATURE", "1"))
 _NVIDIA_THINKING = os.getenv("NVIDIA_ENABLE_THINKING", "1").strip().lower() in {"1", "true", "yes", "on"}
 _LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+# gpt-oss models think before they answer. Without a limit that is 1,000-2,000 hidden
+# tokens (6-12 s) per call; "low" answers in 1-2 s and picked the same products in our checks.
+_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low").strip().lower()
 
 class LLMConfigError(EnvironmentError):
     """The selected LLM provider is not configured (e.g. missing API key)."""
@@ -186,6 +189,10 @@ def _ask_nvidia(prompt: str) -> str:
         "top_p": 0.95,
         "max_tokens": _NVIDIA_MAX_TOKENS,
     }
+
+    # Other models (e.g. Llama on NVIDIA) may reject this option, so only gpt-oss gets it.
+    if _REASONING_EFFORT in {"low", "medium", "high"} and "gpt-oss" in _NVIDIA_MODEL.lower():
+        kwargs["reasoning_effort"] = _REASONING_EFFORT
 
     # Only include NVIDIA-specific kwargs if connecting to official NIM
     if _NVIDIA_THINKING and "nvidia.com" in _NVIDIA_BASE_URL:
@@ -346,7 +353,7 @@ Reply with ONLY this JSON, no markdown, no other text:
         else:
             idx = int(result["index"]) - 1
             if 0 <= idx < len(products) and reason:
-                return {"product": products[idx], "reason": reason}
+                return {"product": products[idx], "reason": _fix_store(reason, products[idx])}
     except Exception as e:
         log.warning("Could not parse LLM recommendation JSON: %s | Raw: %s", e, (raw or "")[:500])
 
@@ -357,6 +364,23 @@ Reply with ONLY this JSON, no markdown, no other text:
         "product": best,
         "reason":  "This is the highest-rated option we found.",
     }
+
+
+_SHOPS = ("Amazon", "Flipkart", "Croma", "Reliance Digital", "Vijay Sales", "Tata CLiQ",
+          "Myntra", "AJIO", "JioMart", "Snapdeal", "Meesho")
+
+
+def _fix_store(reason: str, product: dict) -> str:
+    """The AI sometimes names the wrong shop ("₹499 on Flipkart" for an Amazon
+    product). Correct "on/from/at <shop>"; brand names like "Amazon Basics" stay."""
+    source = str(product.get("source") or "")
+    store = {"amazon": "Amazon", "flipkart": "Flipkart"}.get(source.lower(), source)
+    if not store:
+        return reason
+    for shop in _SHOPS:
+        if shop.lower() != store.lower():
+            reason = re.sub(rf"\b(on|from|at|via)\s+{re.escape(shop)}\b", rf"\1 {store}", reason, flags=re.IGNORECASE)
+    return reason
 
 
 def _rating(p: dict) -> float:
