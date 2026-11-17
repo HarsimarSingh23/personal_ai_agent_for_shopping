@@ -255,6 +255,10 @@ Your task:
 4. Write any budget as "under" plus the full rupee amount, e.g. "under 60000".
    For a range like "50-60k", "50k to 60k" or "between 50000 and 60000", use the upper
    limit: "under 60000". Never write "50k 60k".
+5. Leave out words that only say who will use it or where (college, student, study, office work),
+   because shops then show bags and covers: "laptop for college under 50000" -> "laptop under 50000".
+   Keep them when they are part of the product itself: "school bag", "office chair",
+   "gaming laptop", "running shoes".
 
 User input: "{safe_input}"
 

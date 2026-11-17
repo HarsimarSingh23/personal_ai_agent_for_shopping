@@ -11,11 +11,13 @@ cd D:\Projects\personal_ai_agent_for_shopping
 
 ## 1. The day before
 
-- [ ] Run the tests. You should see `105 passed`.
+- [ ] Run the tests. You should see `161 passed`.
   ```powershell
   .venv\Scripts\python -m pytest -q
   ```
 - [ ] Start the backend (step 2) and do one chat and one search, so you know the AI server is up.
+- [ ] Open the app on the iPhone once. With a free Apple ID the app stops opening 7 days after it was
+      installed; if it does not open, install it again (step 3).
 - [ ] Charge the laptop and the phone. Keep a phone hotspot ready as a backup network.
 
 ## 2. Start the backend
@@ -28,13 +30,16 @@ cd D:\Projects\personal_ai_agent_for_shopping
 .venv\Scripts\python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-**Option B – Docker (PostgreSQL)**
+**Option B – Docker (PostgreSQL)** – what was used for all the testing
 
-Open Docker Desktop first, then:
+Open Docker Desktop first (it does not start by itself when you sign in), then:
 
 ```powershell
-docker compose up --build -d
+docker compose up -d
 ```
+
+This starts the backend and the database that are already built. Use `docker compose up --build -d`
+only after changing the code (it downloads packages and can fail on slow internet).
 
 **Check it works:** open <http://localhost:8000/health> in a browser. You should see
 `"status":"ok"`, `"db":"connected"` and `"llm":"configured"`.
@@ -43,12 +48,15 @@ Keep this window open during the demo. Press `Ctrl+C` to stop it at the end.
 
 ## 3. Start the app
 
-**On the laptop (Chrome)** – easiest for a projector:
+**On the laptop (any browser)** – easiest for a projector, and the backup if the phone has a problem.
+The web app is already built (17 Nov) in `shopping_agent_app\build\web`, so this starts in a second:
 
 ```powershell
-cd shopping_agent_app
-flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000
+.venv\Scripts\python -m http.server 5050 --bind 127.0.0.1 --directory shopping_agent_app\build\web
 ```
+
+Then open <http://localhost:5050>. "Online" under "AI Shopper" means it reached the backend.
+(To rebuild it after changing the app: `cd shopping_agent_app` and `flutter build web`.)
 
 **On an Android phone** (USB debugging on, phone and laptop on the same Wi-Fi):
 
@@ -93,18 +101,22 @@ flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000
 **Server address inside the app:** the same settings icon works on Android and the web too. If the app
 shows "Can't reach the server", tap **Change** on the red banner.
 
-## 4. What to show (tested on 16 Nov 2026)
+## 4. What to show (tested on 17 Nov 2026)
 
 | # | Type this | What it shows |
 |---|-----------|---------------|
 | 1 | `I need earbuds for gym, budget 3000` | Chat understands the need, searches, and shows the **Best pick** with a reason. Tap **Compare all** to see Amazon, Flipkart, Croma and Reliance Digital together, and sort by price or rating. |
-| 2 | `mujhe 50000 ke andar laptop chahiye college ke liye` | Hindi/Hinglish works. Only laptops **under ₹50,000** are shown. |
-| 3 | `iphone 15` | The same phone compared across Flipkart, Croma and Reliance Digital. |
+| 1b | then `Is it good for running?` | It answers from the real product details (battery, latency) and says honestly what the listing does not mention. |
+| 1c | then `ok thanks` | A short reply, no new search. |
+| 2 | `mujhe 50000 ke andar laptop chahiye college ke liye` | Hinglish works, and the reply is in Hinglish. Only laptops **under ₹50,000** are shown. Ask `Yeh achi hai?` to get a Hinglish answer about the pick. |
+| 3 | `iphone 15` | The same phone compared across Amazon, Flipkart, Croma and Reliance Digital. |
 | 4 | `Tell me a joke about politics` | Guardrail: the assistant politely brings the talk back to shopping. |
 | 5 | Open the **History** tab | Past searches are saved for this device. |
+| 6 | Open <http://localhost:8765> on the laptop (optional) | The AgentMonitor dashboard: every step of a search (scrapers, AI calls) with timings. |
 
-Timing: chat replies in 1–2 seconds; searches take about 6–10 seconds.
-Shoes and clothes take about 15–20 seconds, because "other stores" then come from a web search (Myntra, Snapdeal and others).
+Timing: chat replies in about 1 second; a search takes about 8–15 seconds (up to 20 when Amazon
+is slow); the AI's pick inside it takes 1–2 seconds.
+Shoes and clothes can take a little longer, because "other stores" then come from a web search (Myntra, Snapdeal and others).
 
 ## 5. If something goes wrong
 
@@ -114,5 +126,7 @@ Shoes and clothes take about 15–20 seconds, because "other stores" then come f
 | The AI server (gpt-oss) is down | The app still works: chat says "Let me search for that directly", and the search picks the highest-rated product. Replies may be slower. If you have a Gemini key, set `LLM_PROVIDER=gemini` and `GEMINI_API_KEY=...` in `.env` and restart. |
 | Amazon results are missing | Amazon sometimes blocks automated searches for a short time. Flipkart and other stores still show results. Search again after a minute. |
 | Phone cannot connect | Check that both are on the same Wi-Fi and that `http://<laptop IP>:8000/health` opens in the phone's browser. With Docker, Windows already allows Docker through the firewall; without Docker, add the firewall rule from step 3. On iPhone, check *Settings → AI Shopper → Local Network* is on. College Wi-Fi often blocks devices from talking to each other: use the phone's hotspot, run `ipconfig` for the new IP, and enter it with the app's settings icon. |
+| Phone cannot connect, and Windows calls the network "Private" | Windows lets the phone reach Docker only on **Public** networks. Either set the network to Public (*Settings → Network & internet → Wi-Fi → the network → Public network*), or run the firewall rule from step 3 once, in PowerShell **as Administrator**. |
+| Searches are slow (slow internet) | Add `SCRAPE_PAGES=1` to `.env` and run `docker compose up -d`. Searches then read one page per store: about half the time, fewer products. |
 | Backend window was closed | Start it again (step 2). |
 | `/health` shows `"db"` not connected | You are using Docker but Docker Desktop is not running, or `.env` has a Postgres `DATABASE_URL` without Postgres running. Use Option A. |

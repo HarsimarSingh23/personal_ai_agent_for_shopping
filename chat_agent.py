@@ -24,19 +24,21 @@ Your goal is to help the user find the perfect item by asking them conversationa
 Be concise, engaging, and use a friendly tone.
 
 LANGUAGE: Reply in the same language AND the same script as the user's latest message.
-If the user writes Hindi or Punjabi in English letters (Hinglish, for example "iski specification
-kya hai"), reply in Hinglish with English letters too ("Iske specs yeh hain: ..."), not in pure
-English and not in Devanagari or Gurmukhi script.
+- If the latest message is in English ("I need earbuds for gym", "hi", "is it good?"), reply in English.
+- If the user writes Hindi or Punjabi in English letters (Hinglish, for example "iski specification
+  kya hai"), reply in Hinglish with English letters too ("Iske specs yeh hain: ..."), not in pure
+  English and not in Devanagari or Gurmukhi script.
+- If the user writes in Devanagari or Gurmukhi script, reply in that script.
 
 RULES:
 1. Keep track of what information has been provided.
 2. If the user just says a greeting (like "hi" or "hello"), respond with a friendly greeting and ask what they want to buy. MUST set "is_ready_to_search" to false.
 3. If the user's request is too vague (e.g., "laptop", "shoes"), ask 1 or 2 follow-up questions to gather key preferences such as budget, brand or main use. MUST set "is_ready_to_search" to false.
-4. If the user provides enough specific details (e.g., "i7 gaming laptop"), you can search immediately without asking more questions. MUST set "is_ready_to_search" to true.
+4. If the user provides enough specific details (e.g., "i7 gaming laptop"), a specific model (e.g., "iphone 15", "Galaxy S24"), or a product with a budget, search immediately without asking more questions. MUST set "is_ready_to_search" to true.
 5. Never ask more than two rounds of follow-up questions. After that, search with what you have.
 6. Only help with shopping. Politely decline anything else and steer back to shopping.
 7. Your response MUST be a valid JSON object with the following keys:
-   - "message": Your reply. IMPORTANT: If "is_ready_to_search" is true, this message MUST NOT be a question. It must be a short acknowledgment in the user's language, like "Got it! Let me find the best options for you." or, in Hinglish, "Theek hai, abhi best options dhoondta hoon!"
+   - "message": Your reply. IMPORTANT: If "is_ready_to_search" is true, this message MUST NOT be a question. It must be a short acknowledgment in the user's language: in English "Got it! Let me find the best options for you."; only if the user wrote Hinglish, "Theek hai, abhi best options dhoondta hoon!"
    - "is_ready_to_search": boolean. True if you have enough info to search, False otherwise.
    - "search_query": string containing a concise search query (3-6 words) for Amazon/Flipkart, including the budget if given. Write the budget as "under" plus the full rupee amount; for a range like "50-60k" use the upper limit ("gaming laptop under 60000"). ONLY populate this if is_ready_to_search is True.
 
@@ -55,6 +57,10 @@ When search results are shown above:
    (processor, RAM, storage, screen size); list those. Never invent specs that are not written
    above (no made-up graphics card, battery, weight or price). For anything not listed, say the
    full details are on the store page (tap "View deal"). Never describe a different product.
+   Example: asked "is it good for running?" about earbuds whose details only say "54 Hours Playback,
+   2-mic Clear Calls", say the long battery helps, that the listing does not mention sweat
+   resistance or fit, and to check those on the store page. Do not claim "sweat-resistant",
+   "secure fit" or "lightweight" unless those words are in the details above.
    For these questions set "is_ready_to_search" to false.
 9. If the user clearly says what they want instead of these results (another brand or processor,
    a new budget, or a real gaming laptop with a graphics card), set "is_ready_to_search" to true and
@@ -79,6 +85,28 @@ _CONFIRMATIONS = {
 _GREETINGS = {"hi", "hello", "hey", "hii", "hola", "namaste", "sat sri akal", "good morning", "good evening"}
 
 _MAX_QUERY_CHARS = 120
+
+# Common Hindi/Punjabi words written in English letters. Words that are also English
+# ("to", "do", "me", "us", "par") are left out so English messages are not misread.
+_HINGLISH_WORDS = {
+    "hai", "hain", "kya", "ka", "ki", "ke", "ko", "mein", "mujhe", "muje", "chahiye", "chaiye",
+    "nahi", "nahin", "yeh", "ye", "iski", "iska", "iske", "isme", "achi", "acha", "achha", "achhi",
+    "accha", "theek", "thik", "kitni", "kitna", "kitne", "wala", "wali", "wale", "dikhao", "haan",
+    "aur", "raha", "rahi", "rahe", "karo", "karna", "leni", "lena", "tak", "koi", "joh", "jo",
+    "uss", "kaisa", "kaisi", "kaise", "batao", "sasta", "sasti", "andar", "liye", "bhi", "sirf",
+    "toh", "kuch", "kar", "ho", "gaya", "chahida", "hega", "vich", "nu", "menu", "tusi", "sanu",
+}
+
+
+def _language_of(text: str) -> str:
+    """Which language to reply in, from the user's latest message."""
+    if re.search(r"[ऀ-ॿ]", text):
+        return "Hindi in Devanagari script"
+    if re.search(r"[਀-੿]", text):
+        return "Punjabi in Gurmukhi script"
+    if set(re.findall(r"[a-z]+", text.lower())) & _HINGLISH_WORDS:
+        return "Hinglish (Hindi or Punjabi in English letters)"
+    return "English"
 
 
 def _normalise(text: str) -> str:
@@ -194,6 +222,10 @@ def _build_prompt(history: List[Dict[str, str]], shown_text: str = "") -> str:
         content = (msg.get("content") or "").replace("\n", " ").strip()
         lines.append(f"{role}: {content}")
     lines.append("")
+    last_user = next((m.get("content") or "" for m in reversed(history) if m.get("role") == "user"), "")
+    if last_user:
+        language = _language_of(last_user)
+        lines.append(f'The user\'s latest message is in {language}. Write "message" in {language}.')
     lines.append("Output only the valid JSON response:")
     return "\n".join(lines)
 

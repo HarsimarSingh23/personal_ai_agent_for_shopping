@@ -174,6 +174,26 @@ def test_new_search_without_a_query_builds_on_the_earlier_search(monkeypatch):
     assert out["search_query"] == "gaming laptop under 60000 Intel wala dikhao"   # not "Yeh achi hai?"
 
 
+@pytest.mark.parametrize("text, language", [
+    ("I need earbuds for gym, budget 3000", "English"),
+    ("Is it good for running?", "English"),
+    ("ok thanks", "English"),
+    ("iphone 15", "English"),
+    ("Yeh achi hai?", "Hinglish"),
+    ("theek hai", "Hinglish"),
+    ("mujhe 50000 ke andar laptop chahiye college ke liye", "Hinglish"),
+    ("Menu ek water garam karn wali kettle leni 2k tak ki koi ?", "Hinglish"),
+    ("मुझे लैपटॉप चाहिए", "Devanagari"),
+    ("ਮੈਨੂੰ ਫ਼ੋਨ ਚਾਹੀਦਾ", "Gurmukhi"),
+])
+def test_reply_language_follows_the_latest_message(monkeypatch, text, language):
+    assert language in chat_agent._language_of(text)
+    seen = _capture(monkeypatch, {"message": "ok", "is_ready_to_search": False})
+    chat_agent.process_chat([{"role": "user", "content": "laptop"}, {"role": "agent", "content": "Budget?"},
+                             {"role": "user", "content": text}])
+    assert f"The user's latest message is in {chat_agent._language_of(text)}." in seen["prompt"]
+
+
 def test_questions_about_results_do_not_force_a_search(monkeypatch):
     _capture(monkeypatch, {"message": "Details store page par hain.", "is_ready_to_search": False})
     history = [SEARCHED_LINE] + [{"role": "user", "content": q} for q in
