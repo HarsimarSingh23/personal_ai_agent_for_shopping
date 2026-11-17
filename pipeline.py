@@ -22,7 +22,7 @@ from contextlib import nullcontext
 import monitoring
 from config import settings
 from flipkart_scraper import scrape_flipkart as _scrape_flipkart
-from llm import LLMConfigError
+from llm import LLMConfigError, best_rated
 from llm import recommend as _recommend
 from llm import translate_query as _translate_query
 from products import is_accessory, normalize_all, split_budget, wants_accessory
@@ -129,7 +129,7 @@ def drop_over_budget(results: dict[str, list[dict]], query: str) -> dict[str, li
 
 
 def _fallback_recommendation(products: list[dict]) -> dict:
-    best = max(products, key=lambda p: (p.get("rating_value") or 0, p.get("reviews_value") or 0))
+    best = best_rated(products)
     return {"product": best, "reason": "Our AI is busy right now, so this is the highest-rated option we found."}
 
 

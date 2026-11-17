@@ -176,16 +176,43 @@ _SYNONYMS = {
 }
 
 
+# A price range such as "50-60k", "50k to 60k" or "between 50000 and 60000".
+_RANGE = re.compile(
+    r"\b(?:between\s+)?(?:rs\.?|₹|inr)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|lakhs?|lacs?)?\s*"
+    r"(?:-|–|to|and)\s*(?:rs\.?|₹|inr)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k|thousand|lakhs?|lacs?)?(?!\w)",
+    re.IGNORECASE,
+)
+
+
+# Units that make a range a spec, not a price ("10000-20000 mAh", "128-256 GB").
+_SPEC_UNIT = re.compile(r"\s*(mah|gb|tb|mb|w|watts?|hz|inch|inches|cm|mm|kg|litres?|liters?|l)\b", re.IGNORECASE)
+
+
+def _rupees(number: str, unit: str | None) -> float:
+    unit = (unit or "").lower()
+    factor = 1_000 if unit in {"k", "thousand"} else 100_000 if unit.startswith(("lakh", "lac")) else 1
+    return float(number.replace(",", "")) * factor
+
+
 def split_budget(query: str) -> tuple[str, float | None]:
-    """'earbuds under ₹3,000' → ('earbuds', 3000.0); '…under 1.5 lakh' → 150000."""
+    """'earbuds under ₹3,000' → ('earbuds', 3000.0); '…under 1.5 lakh' → 150000.
+
+    A range uses its upper limit: 'gaming laptop 50-60k' → ('gaming laptop', 60000.0).
+    Small ranges like '8-16 GB' or '5-6 inch' are not prices and are left alone.
+    """
     match = _BUDGET.search(query)
-    if not match:
-        return query.strip(), None
-    amount = float(match.group(1).replace(",", ""))
-    unit = (match.group(2) or "").lower()
-    amount *= 1_000 if unit in {"k", "thousand"} else 100_000 if unit.startswith(("lakh", "lac")) else 1
+    if match:
+        amount = _rupees(match.group(1), match.group(2))
+    else:
+        match = _RANGE.search(query)
+        if not match:
+            return query.strip(), None
+        amount = _rupees(match.group(3), match.group(4) or match.group(2))
+        if amount < 1_000 or _SPEC_UNIT.match(query[match.end():]):
+            return query.strip(), None
     cleaned = " ".join((query[:match.start()] + " " + query[match.end():]).split())
     cleaned = re.sub(r"\b(?:rs\.?|inr|rupees)\s*$", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = " ".join(w for w in cleaned.split() if w != "₹")
     return cleaned, (amount if amount > 0 else None)
 
 

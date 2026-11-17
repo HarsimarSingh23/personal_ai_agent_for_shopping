@@ -99,3 +99,21 @@ def test_recommend_falls_back_to_highest_rated(monkeypatch, reply):
     rec = llm.recommend("earbuds", products)
     assert rec["product"] is products[2]          # 4.3 is the best rating
     assert rec["reason"] == "This is the highest-rated option we found."
+
+
+def test_recommend_keeps_the_ai_explanation_when_nothing_fits(monkeypatch):
+    reply = '{"index": null, "reason": "No gaming laptop with a graphics card is under this budget."}'
+    monkeypatch.setattr(llm, "_ask", lambda prompt: reply)
+    products = _products()
+    rec = llm.recommend("gaming laptop under 60000", products)
+    assert rec["product"] is products[2]
+    assert rec["reason"] == ("No gaming laptop with a graphics card is under this budget. "
+                             "This is the best-rated option we found.")
+
+
+def test_best_rated_ignores_ratings_from_very_few_reviews():
+    lone_five_star = {"title": "A", "rating_value": 5.0, "reviews_value": 1}
+    solid = {"title": "B", "rating_value": 4.3, "reviews_value": 2178}
+    weaker = {"title": "C", "rating_value": 4.0, "reviews_value": 538}
+    assert llm.best_rated([lone_five_star, solid, weaker]) is solid
+    assert llm.best_rated([lone_five_star]) is lone_five_star      # nothing better: still returns one

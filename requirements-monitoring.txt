@@ -1,4 +1,9 @@
 # Optional: AgentMonitor observability dashboard (see monitoring.py).
 # Installed from GitHub; pin to a commit/tag for reproducible builds, e.g.
-#   agenticmonitor[tokens] @ git+https://github.com/HarsimarSingh23/AgentMonitor.git@<commit-sha>
-agenticmonitor[tokens] @ git+https://github.com/HarsimarSingh23/AgentMonitor.git
+#   agenticmonitor @ git+https://github.com/HarsimarSingh23/AgentMonitor.git@<commit-sha>
+#
+# Without the [tokens] extra on purpose: with it, importing the dashboard makes
+# tiktoken download its token tables from the internet in every new container,
+# which held up API startup for minutes when that download was slow. Token
+# counts on the dashboard are estimates instead.
+agenticmonitor @ git+https://github.com/HarsimarSingh23/AgentMonitor.git
