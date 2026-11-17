@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from itertools import zip_longest
 from urllib.parse import quote
 
@@ -30,7 +30,15 @@ log = logging.getLogger(__name__)
 
 PAGES = max(2, settings.scrape_pages)   # SCRAPE_PAGES; Croma reads at least 2 pages
 PER_STORE = 8 * PAGES
-TIMEOUT_SECONDS = 10
+TIMEOUT_SECONDS = 10           # one request to Croma or Reliance
+STORES_WAIT_SECONDS = 8        # stop waiting for Croma and Reliance after this
+STEP_SECONDS = 15              # the whole step, web-search fallback included
+MIN_WEB_SECONDS = 3            # don't start a web search with less time than this left
+CROMA_MORE_PAGES_WITHIN = 4    # read Croma's next pages only if the first came back this fast
+
+# Shared and never closed with "with": a shop that is slow keeps running in the
+# background instead of holding up the whole search.
+_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="store")
 
 _CROMA_API = (
     "https://api.croma.com/searchservices/v1/search?currentPage={page}&query={query}"
@@ -68,7 +76,11 @@ def scrape_croma(query: str) -> list[dict]:
     # Croma gives 21 products per page; read PAGES pages so enough remain after
     # the relevance and budget checks. Only the first page is required.
     raw = []
+    started = time.monotonic()
     for page in range(PAGES):
+        if page > 0 and time.monotonic() - started > CROMA_MORE_PAGES_WITHIN:
+            log.info("Croma is slow right now; keeping its first page only")
+            break
         try:
             data = _get_json(_CROMA_API.format(page=page, query=quote(f"{text}:relevance")))
         except Exception:
@@ -122,26 +134,43 @@ def scrape_reliance(query: str) -> list[dict]:
 _STORES = {"Croma": scrape_croma, "Reliance Digital": scrape_reliance}
 
 
-def scrape_other_stores(query: str) -> list[dict]:
-    """Croma + Reliance Digital in parallel; web search if both have nothing."""
-    started = time.monotonic()
+def _results(futures: dict[str, Future], seconds: float) -> dict[str, list[dict]]:
+    """Each job's products, or [] if it failed or was not done within `seconds`."""
+    done, _ = wait(futures.values(), timeout=max(0.0, seconds))
     found: dict[str, list[dict]] = {}
-    with ThreadPoolExecutor(max_workers=len(_STORES), thread_name_prefix="store") as pool:
-        futures = {name: pool.submit(fn, query) for name, fn in _STORES.items()}
-        for name, future in futures.items():
-            try:
-                found[name] = future.result()
-            except Exception as e:  # one shop being down must not hide the other
-                log.warning("%s search failed: %s", name, e)
-                found[name] = []
+    for name, future in futures.items():
+        if future not in done:
+            log.warning("%s took longer than %.0fs; skipping it", name, seconds)
+            found[name] = []
+            continue
+        try:
+            found[name] = future.result() or []
+        except Exception as e:  # one shop being down must not hide the other
+            log.warning("%s search failed: %s", name, e)
+            found[name] = []
+    return found
+
+
+def scrape_other_stores(query: str) -> list[dict]:
+    """Croma + Reliance Digital in parallel; web search if both have nothing.
+
+    The whole step takes at most STEP_SECONDS, so a slow or unreachable shop
+    never makes the search wait much longer than Amazon and Flipkart.
+    """
+    started = time.monotonic()
+    found = _results({name: _pool.submit(fn, query) for name, fn in _STORES.items()}, STORES_WAIT_SECONDS)
 
     # Alternate between shops so both show near the top.
     results = [p for row in zip_longest(*found.values()) for p in row if p]
     log.info("Other stores: %s (%.1fs)", {k: len(v) for k, v in found.items()}, time.monotonic() - started)
 
     if not results:
-        log.info("Croma and Reliance had nothing for %r; trying web search", query)
-        results = scrape_ddg(query)
+        left = STEP_SECONDS - (time.monotonic() - started)
+        if left < MIN_WEB_SECONDS:
+            log.info("No time left for a web search for %r", query)
+            return []
+        log.info("Croma and Reliance had nothing for %r; trying web search (%.0fs left)", query, left)
+        results = _results({"Web search": _pool.submit(scrape_ddg, query)}, left)["Web search"]
     return results
 
 

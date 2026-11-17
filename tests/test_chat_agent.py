@@ -140,6 +140,60 @@ def test_no_results_section_without_a_shown_search(monkeypatch):
     assert "SEARCH RESULTS ALREADY SHOWN" not in seen["prompt"]
 
 
+AFTER_ANSWER = [
+    SEARCHED_LINE,
+    {"role": "user", "content": "Yeh achi hai?"},
+    {"role": "agent", "content": "Haan, yeh ek bahut achha option hai."},
+]
+
+
+@pytest.mark.parametrize("shown", [SHOWN, None])   # None: the saved results could not be loaded
+def test_ok_after_an_answer_does_not_start_a_new_search(monkeypatch, shown):
+    _capture(monkeypatch, {"message": "Great! Kuch aur chahiye toh batana.", "is_ready_to_search": False})
+    out = chat_agent.process_chat(AFTER_ANSWER + [{"role": "user", "content": "ok"}], shown=shown)
+    assert out == {"message": "Great! Kuch aur chahiye toh batana.", "is_ready_to_search": False, "search_query": ""}
+
+
+def test_results_rules_cover_acknowledgements_and_buying(monkeypatch):
+    seen = _capture(monkeypatch, {"message": "Great!", "is_ready_to_search": False})
+    chat_agent.process_chat(AFTER_ANSWER + [{"role": "user", "content": "ok"}], shown=SHOWN)
+    assert "only says ok, thanks" in seen["prompt"]
+    assert "cannot place orders" in seen["prompt"]
+
+
+def test_ai_failure_after_results_does_not_search(monkeypatch):
+    _reply(monkeypatch, "not json at all")
+    out = chat_agent.process_chat([SEARCHED_LINE, {"role": "user", "content": "Yeh achi hai?"}], shown=SHOWN)
+    assert out["is_ready_to_search"] is False
+    assert "View deal" in out["message"]
+
+
+def test_new_search_without_a_query_builds_on_the_earlier_search(monkeypatch):
+    _capture(monkeypatch, {"message": "Searching!", "is_ready_to_search": True, "search_query": ""})
+    out = chat_agent.process_chat(AFTER_ANSWER + [{"role": "user", "content": "Intel wala dikhao"}], shown=SHOWN)
+    assert out["search_query"] == "gaming laptop under 60000 Intel wala dikhao"   # not "Yeh achi hai?"
+
+
+@pytest.mark.parametrize("text, language", [
+    ("I need earbuds for gym, budget 3000", "English"),
+    ("Is it good for running?", "English"),
+    ("ok thanks", "English"),
+    ("iphone 15", "English"),
+    ("Yeh achi hai?", "Hinglish"),
+    ("theek hai", "Hinglish"),
+    ("mujhe 50000 ke andar laptop chahiye college ke liye", "Hinglish"),
+    ("Menu ek water garam karn wali kettle leni 2k tak ki koi ?", "Hinglish"),
+    ("मुझे लैपटॉप चाहिए", "Devanagari"),
+    ("ਮੈਨੂੰ ਫ਼ੋਨ ਚਾਹੀਦਾ", "Gurmukhi"),
+])
+def test_reply_language_follows_the_latest_message(monkeypatch, text, language):
+    assert language in chat_agent._language_of(text)
+    seen = _capture(monkeypatch, {"message": "ok", "is_ready_to_search": False})
+    chat_agent.process_chat([{"role": "user", "content": "laptop"}, {"role": "agent", "content": "Budget?"},
+                             {"role": "user", "content": text}])
+    assert f"The user's latest message is in {chat_agent._language_of(text)}." in seen["prompt"]
+
+
 def test_questions_about_results_do_not_force_a_search(monkeypatch):
     _capture(monkeypatch, {"message": "Details store page par hain.", "is_ready_to_search": False})
     history = [SEARCHED_LINE] + [{"role": "user", "content": q} for q in

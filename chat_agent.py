@@ -24,19 +24,21 @@ Your goal is to help the user find the perfect item by asking them conversationa
 Be concise, engaging, and use a friendly tone.
 
 LANGUAGE: Reply in the same language AND the same script as the user's latest message.
-If the user writes Hindi or Punjabi in English letters (Hinglish, for example "iski specification
-kya hai"), reply in Hinglish with English letters too ("Iske specs yeh hain: ..."), not in pure
-English and not in Devanagari or Gurmukhi script.
+- If the latest message is in English ("I need earbuds for gym", "hi", "is it good?"), reply in English.
+- If the user writes Hindi or Punjabi in English letters (Hinglish, for example "iski specification
+  kya hai"), reply in Hinglish with English letters too ("Iske specs yeh hain: ..."), not in pure
+  English and not in Devanagari or Gurmukhi script.
+- If the user writes in Devanagari or Gurmukhi script, reply in that script.
 
 RULES:
 1. Keep track of what information has been provided.
 2. If the user just says a greeting (like "hi" or "hello"), respond with a friendly greeting and ask what they want to buy. MUST set "is_ready_to_search" to false.
 3. If the user's request is too vague (e.g., "laptop", "shoes"), ask 1 or 2 follow-up questions to gather key preferences such as budget, brand or main use. MUST set "is_ready_to_search" to false.
-4. If the user provides enough specific details (e.g., "i7 gaming laptop"), you can search immediately without asking more questions. MUST set "is_ready_to_search" to true.
+4. If the user provides enough specific details (e.g., "i7 gaming laptop"), a specific model (e.g., "iphone 15", "Galaxy S24"), or a product with a budget, search immediately without asking more questions. MUST set "is_ready_to_search" to true.
 5. Never ask more than two rounds of follow-up questions. After that, search with what you have.
 6. Only help with shopping. Politely decline anything else and steer back to shopping.
 7. Your response MUST be a valid JSON object with the following keys:
-   - "message": Your reply. IMPORTANT: If "is_ready_to_search" is true, this message MUST NOT be a question. It must be a short acknowledgment like "Got it! Let me find the best options for you."
+   - "message": Your reply. IMPORTANT: If "is_ready_to_search" is true, this message MUST NOT be a question. It must be a short acknowledgment in the user's language: in English "Got it! Let me find the best options for you."; only if the user wrote Hinglish, "Theek hai, abhi best options dhoondta hoon!"
    - "is_ready_to_search": boolean. True if you have enough info to search, False otherwise.
    - "search_query": string containing a concise search query (3-6 words) for Amazon/Flipkart, including the budget if given. Write the budget as "under" plus the full rupee amount; for a range like "50-60k" use the upper limit ("gaming laptop under 60000"). ONLY populate this if is_ready_to_search is True.
 
@@ -55,11 +57,21 @@ When search results are shown above:
    (processor, RAM, storage, screen size); list those. Never invent specs that are not written
    above (no made-up graphics card, battery, weight or price). For anything not listed, say the
    full details are on the store page (tap "View deal"). Never describe a different product.
+   Example: asked "is it good for running?" about earbuds whose details only say "54 Hours Playback,
+   2-mic Clear Calls", say the long battery helps, that the listing does not mention sweat
+   resistance or fit, and to check those on the store page. Do not claim "sweat-resistant",
+   "secure fit" or "lightweight" unless those words are in the details above.
    For these questions set "is_ready_to_search" to false.
-9. If the user wants something different from these results (another brand or processor, a new
-   budget, or a real gaming laptop with a graphics card), set "is_ready_to_search" to true and
+9. If the user clearly says what they want instead of these results (another brand or processor,
+   a new budget, or a real gaming laptop with a graphics card), set "is_ready_to_search" to true and
    write a new "search_query" with the new need. Keep the product type and budget from the
-   earlier search unless the user changed them.
+   earlier search unless the user changed them. If the user only complains or it is not clear
+   what they want instead, ask one short question first and set "is_ready_to_search" to false.
+   Never add a spec (like i7 or RTX) to the search that the user did not ask for.
+10. If the user only says ok, thanks, nice, theek hai or something similar, reply in one short
+   friendly line and set "is_ready_to_search" to false. Start a new search only when the user asks
+   for something new, or says yes to a search you offered; then put that search in "search_query".
+   This app cannot place orders: to buy, the user taps "View deal" to open the store's page.
 """
 
 # The app adds this line to the history after a search (see agent_chat_screen.dart).
@@ -73,6 +85,28 @@ _CONFIRMATIONS = {
 _GREETINGS = {"hi", "hello", "hey", "hii", "hola", "namaste", "sat sri akal", "good morning", "good evening"}
 
 _MAX_QUERY_CHARS = 120
+
+# Common Hindi/Punjabi words written in English letters. Words that are also English
+# ("to", "do", "me", "us", "par") are left out so English messages are not misread.
+_HINGLISH_WORDS = {
+    "hai", "hain", "kya", "ka", "ki", "ke", "ko", "mein", "mujhe", "muje", "chahiye", "chaiye",
+    "nahi", "nahin", "yeh", "ye", "iski", "iska", "iske", "isme", "achi", "acha", "achha", "achhi",
+    "accha", "theek", "thik", "kitni", "kitna", "kitne", "wala", "wali", "wale", "dikhao", "haan",
+    "aur", "raha", "rahi", "rahe", "karo", "karna", "leni", "lena", "tak", "koi", "joh", "jo",
+    "uss", "kaisa", "kaisi", "kaise", "batao", "sasta", "sasti", "andar", "liye", "bhi", "sirf",
+    "toh", "kuch", "kar", "ho", "gaya", "chahida", "hega", "vich", "nu", "menu", "tusi", "sanu",
+}
+
+
+def _language_of(text: str) -> str:
+    """Which language to reply in, from the user's latest message."""
+    if re.search(r"[ऀ-ॿ]", text):
+        return "Hindi in Devanagari script"
+    if re.search(r"[਀-੿]", text):
+        return "Punjabi in Gurmukhi script"
+    if set(re.findall(r"[a-z]+", text.lower())) & _HINGLISH_WORDS:
+        return "Hinglish (Hindi or Punjabi in English letters)"
+    return "English"
 
 
 def _normalise(text: str) -> str:
@@ -89,7 +123,12 @@ def _as_bool(value) -> bool:
 
 
 def _derive_query(history: List[Dict[str, str]]) -> str:
-    """Build a search query from what the user actually said."""
+    """Build a search query from what the user actually said.
+
+    After a search, it is the earlier search plus the user's latest message
+    ("electric kettle under 2000 1.7 litre wali"), never questions alone.
+    """
+    earlier = searched_query(history)
     parts = []
     for msg in history:
         if msg.get("role") != "user":
@@ -97,6 +136,8 @@ def _derive_query(history: List[Dict[str, str]]) -> str:
         text = _normalise(msg.get("content", ""))
         if text and text not in _CONFIRMATIONS and text not in _GREETINGS:
             parts.append(msg["content"].strip())
+    if earlier:
+        parts = [earlier] + parts[-1:]
     return " ".join(parts[-3:])[:_MAX_QUERY_CHARS].strip()
 
 
@@ -181,6 +222,10 @@ def _build_prompt(history: List[Dict[str, str]], shown_text: str = "") -> str:
         content = (msg.get("content") or "").replace("\n", " ").strip()
         lines.append(f"{role}: {content}")
     lines.append("")
+    last_user = next((m.get("content") or "" for m in reversed(history) if m.get("role") == "user"), "")
+    if last_user:
+        language = _language_of(last_user)
+        lines.append(f'The user\'s latest message is in {language}. Write "message" in {language}.')
     lines.append("Output only the valid JSON response:")
     return "\n".join(lines)
 
@@ -199,6 +244,8 @@ def process_chat(history: List[Dict[str, str]], shown: Dict | None = None) -> Di
     last_user = next((m for m in reversed(history) if m.get("role") == "user"), None)
     last_user_text = _normalise(last_user.get("content", "")) if last_user else ""
     shown_text = shown_results_text(shown) if shown else ""
+    # The chat already searched (the results may not be loaded if the lookup failed).
+    after_search = bool(shown_text) or searched_query(history) is not None
 
     try:
         response = _get_chat_response(_build_prompt(history, shown_text))
@@ -206,6 +253,13 @@ def process_chat(history: List[Dict[str, str]], shown: Dict | None = None) -> Di
         raise
     except Exception as e:
         log.error("All retries failed for chat_agent: %s", e)
+        if after_search:
+            # Probably a question about the shown products: answer honestly, don't search.
+            return {
+                "message": "Sorry, I couldn't answer that just now. Please try again, or tap \"View deal\" to see the full details on the store's page.",
+                "is_ready_to_search": False,
+                "search_query": "",
+            }
         query = _derive_query(history)
         if not query:
             return {
@@ -232,7 +286,9 @@ def process_chat(history: List[Dict[str, str]], shown: Dict | None = None) -> Di
         return response
 
     # Guardrail 1: the user confirmed — stop asking and search.
-    if last_user_text in _CONFIRMATIONS and len(history) >= 2:
+    # Not after a search: there "ok" just acknowledges the answer, and a "yes" to a
+    # new search the AI offered comes back from the AI as ready with its own query.
+    if last_user_text in _CONFIRMATIONS and len(history) >= 2 and not after_search:
         query = response["search_query"] or _derive_query(history)
         if query:
             log.info("Guardrail: user confirmed, forcing search.")
@@ -250,7 +306,7 @@ def process_chat(history: List[Dict[str, str]], shown: Dict | None = None) -> Di
     # Guardrail 3: too many follow-up rounds — search with what we have.
     # Not after a search: questions about the shown results are not a request to search.
     user_turns = sum(1 for m in history if m.get("role") == "user")
-    if user_turns >= 4 and not shown_text:
+    if user_turns >= 4 and not after_search:
         query = _derive_query(history)
         if query:
             log.info("Guardrail: %d user turns without a search, forcing search.", user_turns)

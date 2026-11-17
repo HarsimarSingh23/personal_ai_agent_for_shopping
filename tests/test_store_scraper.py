@@ -3,6 +3,9 @@
 No network: every outside call is replaced with canned data.
 """
 
+import threading
+import time
+
 import pytest
 
 import ddg_scraper
@@ -126,6 +129,44 @@ def test_other_stores_fall_back_to_web_search(monkeypatch):
     monkeypatch.setattr(store_scraper, "_STORES", {"Croma": lambda q: [], "Reliance Digital": lambda q: []})
     monkeypatch.setattr(store_scraper, "scrape_ddg", lambda q: [{"title": f"web: {q}"}])
     assert store_scraper.scrape_other_stores("running shoes") == [{"title": "web: running shoes"}]
+
+
+def test_a_slow_shop_does_not_hold_up_the_search(monkeypatch):
+    release = threading.Event()
+    monkeypatch.setattr(store_scraper, "STORES_WAIT_SECONDS", 0.3)
+    monkeypatch.setattr(store_scraper, "_STORES", {
+        "Croma": lambda q: release.wait(5) and [{"title": "too late"}],
+        "Reliance Digital": lambda q: [{"title": "R1"}],
+    })
+    started = time.monotonic()
+    try:
+        assert [p["title"] for p in store_scraper.scrape_other_stores("tv")] == ["R1"]
+        assert time.monotonic() - started < 2
+    finally:
+        release.set()
+
+
+def test_web_search_gets_only_the_time_that_is_left(monkeypatch):
+    release = threading.Event()
+    monkeypatch.setattr(store_scraper, "_STORES", {"Croma": lambda q: [], "Reliance Digital": lambda q: []})
+    monkeypatch.setattr(store_scraper, "STEP_SECONDS", 0.3)
+    monkeypatch.setattr(store_scraper, "MIN_WEB_SECONDS", 0)
+    monkeypatch.setattr(store_scraper, "scrape_ddg", lambda q: release.wait(5) and [{"title": "too late"}])
+    started = time.monotonic()
+    try:
+        assert store_scraper.scrape_other_stores("running shoes") == []
+        assert time.monotonic() - started < 2
+    finally:
+        release.set()
+
+
+def test_no_web_search_when_no_time_is_left(monkeypatch):
+    calls = []
+    monkeypatch.setattr(store_scraper, "_STORES", {"Croma": lambda q: [], "Reliance Digital": lambda q: []})
+    monkeypatch.setattr(store_scraper, "STEP_SECONDS", 0)
+    monkeypatch.setattr(store_scraper, "scrape_ddg", lambda q: calls.append(q) or [])
+    assert store_scraper.scrape_other_stores("running shoes") == []
+    assert calls == []
 
 
 # ── Web-search fallback ──────────────────────────────────────────────────────
